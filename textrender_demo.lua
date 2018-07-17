@@ -10,27 +10,30 @@ local win = nw:app():window{
 	w = 1800, h = 800,
 }
 
-local mmaps = {}
-local function load_font(file, name)
+local function font(file, name)
 	local name = name or assert(file:match('([^\\/]+)%.[a-z]+$')):lower()
-	local mmap = assert(bundle.mmap(file), 'Font file not found: '..file)
-	tr:load_font(name, mmap.data, mmap.size)
-	mmaps[mmap] = true --pin it
+	tr:add_font_file(file, name)
+	tr:font(name)
 end
 
-local function load_gfont(name)
-	load_font(assert(gfonts.font_file(name)), name)
+local function gfont(name)
+	local file = assert(gfonts.font_file(tr.font_db:parse_font(name)))
+	font(file, name)
 end
 
---load_gfont'Open Sans'
---load_font'media/fonts/NotoColorEmoji.ttf'
---load_font'media/fonts/NotoEmoji-Regular.ttf'
---load_font'media/fonts/EmojiSymbols-Regular.ttf'
---load_font'media/fonts/SubwayTicker.ttf'
---load_font'media/fonts/dotty.ttf'
---load_font'media/fonts/ss-emoji-microsoft.ttf'
---load_font'media/fonts/Hand Faces St.ttf'
-load_font'media/fonts/FSEX300.ttf'
+gfont'open sans'
+gfont'open sans, italic'
+gfont'open sans, bold, italic'
+font'media/fonts/NotoColorEmoji.ttf'
+font'media/fonts/NotoEmoji-Regular.ttf'
+font'media/fonts/EmojiSymbols-Regular.ttf'
+font'media/fonts/SubwayTicker.ttf'
+font'media/fonts/dotty.ttf'
+font'media/fonts/ss-emoji-microsoft.ttf'
+font'media/fonts/Hand Faces St.ttf'
+font'media/fonts/FSEX300.ttf'
+
+tr.font_db:dump()
 
 --tr:setfont('Open Sans', 14)
 --tr:setfont('NotoEmoji-Regular', 109)
@@ -39,7 +42,8 @@ load_font'media/fonts/FSEX300.ttf'
 --tr:setfont('dotty', 32)
 --tr:setfont('ss-emoji-microsoft', 14)
 --tr:setfont('Hand Faces St', 14)
-tr:setfont('FSEX300', 14)
+tr:setfont'fsex300,14'
+--tr:setfont'open_sans,bold,italic,30'
 
 local ii=0
 function win:repaint()
@@ -70,7 +74,9 @@ function win:repaint()
 
 	else
 
-		tr:paint_text('Hello there! هذه هي بعض النصوص العربي', nil, 100, 100)
+		tr:shape_text('Hello there! هذه هي بعض النصوص العربي')
+		tr:paint_text(100, 100)
+		tr:clear()
 
 	end
 
