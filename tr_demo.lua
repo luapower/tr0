@@ -1,10 +1,10 @@
 
-local tr = require'textrender'
+local tr = require'tr'
 local nw = require'nw'
 local bundle = require'bundle'
 local gfonts = require'gfonts'
 
-local tr = tr.cairo_render()
+local tr = tr.cairo_renderer()
 
 local win = nw:app():window{
 	w = 1800, h = 800,
@@ -13,7 +13,8 @@ local win = nw:app():window{
 local function font(file, name)
 	local name = name or assert(file:match('([^\\/]+)%.[a-z]+$')):lower()
 	tr:add_font_file(file, name)
-	tr:font(name)
+	local font = tr:load_font(name)
+	print(tr:internal_font_name(font))
 end
 
 local function gfont(name)
@@ -22,8 +23,9 @@ local function gfont(name)
 end
 
 gfont'open sans'
-gfont'open sans, italic'
-gfont'open sans, bold, italic'
+gfont'open sans italic'
+gfont'open sans bold italic'
+gfont'open sans 300 italic'
 font'media/fonts/NotoColorEmoji.ttf'
 font'media/fonts/NotoEmoji-Regular.ttf'
 font'media/fonts/EmojiSymbols-Regular.ttf'
@@ -32,18 +34,19 @@ font'media/fonts/dotty.ttf'
 font'media/fonts/ss-emoji-microsoft.ttf'
 font'media/fonts/Hand Faces St.ttf'
 font'media/fonts/FSEX300.ttf'
+font'media/fonts/amiri-regular.ttf'
 
 tr.font_db:dump()
 
---tr:setfont('Open Sans', 14)
---tr:setfont('NotoEmoji-Regular', 109)
---tr:setfont('EmojiSymbols-Regular', 100)
---tr:setfont('SubwayTicker', 15)
---tr:setfont('dotty', 32)
---tr:setfont('ss-emoji-microsoft', 14)
---tr:setfont('Hand Faces St', 14)
-tr:setfont'fsex300,14'
---tr:setfont'open_sans,bold,italic,30'
+tr:setfont'NotoColorEmoji, 100'
+tr:setfont'NotoEmoji, 109'
+tr:setfont'EmojiSymbols, 100'
+tr:setfont'SubwayTicker, 15'
+tr:setfont'dotty, 32'
+tr:setfont'ss-emoji-microsoft, 14'
+tr:setfont'Hand Faces St, 14'
+tr:setfont'fsex300, 14'
+tr:setfont'open sans 200 italic, 200'
 
 local ii=0
 function win:repaint()
@@ -72,10 +75,27 @@ function win:repaint()
 			end
 		end
 
-	else
+	elseif false then
 
-		tr:shape_text('Hello there! هذه هي بعض النصوص العربي')
-		tr:paint_text(100, 100)
+		tr:setfont'NotoColorEmoji,100'
+		for i = 1, 10 do
+			for j = 1, 10 do
+				tr:paint_glyph(tr:load_glyph(i*10+j, i*150, j*150))
+			end
+		end
+
+	elseif true then
+
+		tr:clear_runs()
+		tr:text_run{text = 'Hello!'}
+		tr:process_runs()
+		--tr:run_text'هذه هي بعض النصوص العربي\nHello there!'
+		--tr:run_font'amiri, 50'
+
+		tr:setfont'amiri, 50'
+		--tr:shape_text('Hello there!\nهذه هي بعض النصوص العربي')
+		tr:shape_text('هذه هي بعض النصوص العربي\nHello there!')
+		tr:paint_text(100, 300)
 		tr:clear()
 
 	end
