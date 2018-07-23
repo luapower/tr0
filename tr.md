@@ -6,7 +6,7 @@ using exclusively portable technologies for pixel-perfect consistent output
 across platforms. Supports complex text shaping based on [harfbuzz]
 and [fribidi] and glyph caching and rasterization based on [freetype].
 
-### Features:
+### Features
 
   * subpixel positioning
   * OMG color emoticons!
