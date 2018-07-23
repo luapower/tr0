@@ -1,5 +1,5 @@
 
---Portable Unicode text shaping and rendering.
+--Unicode text shaping and rendering.
 --Written by Cosmin Apreutesei. Public Domain.
 
 if not ... then require'tr_demo'; return end
