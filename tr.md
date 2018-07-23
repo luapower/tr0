@@ -2,9 +2,8 @@
 ## `local tr = require'tr'`
 
 Unicode text shaping and rendering engine using exclusively portable
-technologies for pixel-perfect consistent output across platforms.
-
-Complex text shaping based on [harfbuzz] and [fribidi]. Glyph caching
+technologies for pixel-perfect consistent output across platforms. Supports
+complex text shaping based on [harfbuzz] and [fribidi] and glyph caching
 and rasterization based on [freetype].
 
 Features:
