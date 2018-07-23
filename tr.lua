@@ -1,8 +1,8 @@
 
---Text shaping and rendering based on harfbuzz and freetype.
+--Unicode text rendering based on harfbuzz and freetype.
 --Written by Cosmin Apreutesei. Public Domain.
 
-if not ... then require'textrender_demo'; return end
+if not ... then require'tr_demo'; return end
 
 local ffi = require'ffi'
 local bit = require'bit'
@@ -15,6 +15,8 @@ local glue = require'glue'
 local tuple = require'tuple'
 local lrucache = require'lrucache'
 local cairo = require'cairo'
+local detect_scripts = require'tr_shape_script'
+local reorder_runs = require'tr_shape_reorder'
 
 local push = table.insert
 local pop = table.remove
@@ -180,7 +182,7 @@ function font_db:dump()
 	end
 end
 
---glyph tr -------------------------------------------------------------
+--glyph rendering ------------------------------------------------------------
 
 local tr = object()
 
@@ -438,7 +440,7 @@ end
 
 function tr:paint_glyph(glyph, x, y) end --stub
 
---cairo glyph tr -------------------------------------------------------
+--cairo glyph rendering ------------------------------------------------------
 
 local cairo_tr = object(tr)
 
@@ -477,116 +479,6 @@ function cairo_tr:paint_glyph(glyph, x, y)
 	end
 end
 
---unicode script detection ---------------------------------------------------
-
-local non_scripts = index{
-	hb.C.HB_SCRIPT_INVALID,
-	hb.C.HB_SCRIPT_COMMON,
-	hb.C.HB_SCRIPT_INHERITED,
-	hb.C.HB_SCRIPT_UNKNOWN, --unassigned, private use, non-characters
-}
-local function real_script(script)
-	return not non_scripts[script]
-end
-
-local pair_indices = index{
-  0x0028, 0x0029, -- ascii paired punctuation
-  0x003c, 0x003e,
-  0x005b, 0x005d,
-  0x007b, 0x007d,
-  0x00ab, 0x00bb, -- guillemets
-  0x2018, 0x2019, -- general punctuation
-  0x201c, 0x201d,
-  0x2039, 0x203a,
-  0x3008, 0x3009, -- chinese paired punctuation
-  0x300a, 0x300b,
-  0x300c, 0x300d,
-  0x300e, 0x300f,
-  0x3010, 0x3011,
-  0x3014, 0x3015,
-  0x3016, 0x3017,
-  0x3018, 0x3019,
-  0x301a, 0x301b
-}
-local function pair(c)
-	local i = pair_indices[c]
-	if not i then return nil end
-	local open = i % 2 == 1
-	return i - (open and 0 or 1), open
-end
-
-local function is_combining_mark(c)
-	local cat = hb.unicode_general_category(c)
-	return
-		cat == hb.C.HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK or
-		cat == hb.C.HB_UNICODE_GENERAL_CATEGORY_SPACING_MARK or
-		cat == hb.C.HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK
-end
-
---fills a buffer with the Script property for each char in a utf32 buffer.
---uses UAX#24 Section 5.1 and 5.2 to resolve chars with implicit scripts.
-local function detect_scripts(s, len, outbuf)
-	local script = hb.C.HB_SCRIPT_COMMON
-	local first_script
-	local base_char_i = 0
-	local stack = {}
-	for i = 0, len-1 do
-		local c = s[i]
-		if is_combining_mark(c) then --Section 5.2
-			if not real_script(script) then --base char has no script
-				local sc = hb.unicode_script(c)
-				if real_script(sc) then --this combining mark has a script
-					script = sc --subsequent marks must use this script too
-					--resolve all previous marks and the base char
-					for i = base_char_i, i-1 do
-						outbuf[i] = script
-					end
-				end
-			end
-		else
-			local sc = hb.unicode_script(c)
-			if sc == hb.C.HB_SCRIPT_COMMON then --Section 5.1
-				local pair, open = pair(c)
-				if pair then
-					if open then --remember the enclosing script
-						push(stack, script)
-						push(stack, pair)
-					else --restore the enclosing script
-						for i = #stack, 1, -2 do
-							if stack[i] == pair then --pair opened here
-								for i = #stack, i, -2 do
-									pop(stack)
-									script = pop(stack)
-								end
-								break
-							end
-						end
-					end
-				end
-			elseif real_script(sc) then
-				if script == hb.C.HB_SCRIPT_COMMON then
-					--found a script for the first time: resolve all previous
-					--unresolved chars.
-					for i = 0, i-1 do
-						if outbuf[i] == hb.C.HB_SCRIPT_COMMON then
-							outbuf[i] = sc
-						end
-					end
-					--resolve unresolved scripts of open pairs too.
-					for i = 2, #stack, 2 do
-						if stack[i] == hb.C.HB_SCRIPT_COMMON then
-							stack[i] = sc
-						end
-					end
-				end
-				script = sc
-			end
-			base_char_i = base_char_i + 1
-		end
-		outbuf[i] = script
-	end
-end
-
 --unicode text shaping -------------------------------------------------------
 
 function tr:text_run(run)
@@ -594,155 +486,27 @@ function tr:text_run(run)
 	push(self.runs, run)
 end
 
+function tr:runs_base_dir(dir)
+	self.runs = self.runs or {}
+	assert(dir == 'rtl' or dir == 'ltr' or dir == false)
+	self.runs.base_dir = dir
+end
+
 function tr:clear_runs()
 	self.runs = false
 end
 
-function tr:process_runs()
-
-	--get entire text length in codepoints
-	local len = 0
-	for _,run in ipairs(self.runs) do
-		run.length = run.length or #run.text
-		run.charset = run.charset or 'utf8'
-		if run.charset == 'utf8' then
-			run.cp_length = utf8.decode(run.text, run.length)
-			len = len + run.cp_length
-		elseif run.charset == 'utf32' then
-			run.cp_length = run.cp_length
-			len = len + run.cp_length
-		else
-			assert(false, 'invalid charset %s', tostring(run.charset))
-		end
-	end
-
-	--convert text to utf32
-	local b = fb.buffers(len, nil, 'utf-8')
-	local offset = 0
-	for _,run in ipairs(self.runs) do
-		local out = b.str + offset
-		if run.charset == 'utf8' then
-			utf8.decode(run.text, run.length, out, run.cp_length)
-		elseif run.charset == 'utf32' then
-			ffi.copy(out, run.text, run.cp_length * 4)
-		end
-		offset = offset + run.cp_length
-	end
-
-
-	--[[
-	local run = self.run
-	run.font, run.font_size = self.font_db:find_font(...)
-	assert(run.font, 'Font not found: %s', (...))
-
-	charset = charset or 'utf-8'
-	len = len or (charset == 'utf-8' and #s)
-	local run = self.run
-	run.text = ffi.new('uint32_t[?]', len)
-	run.length = len
-	assert(fb.charset_to_unicode(charset, s, len, run.text, run.length))
-
-	for i,run in ipairs(self.runs) do
-		if run.font == font
-			and run.font_size = size
-			and run.script == script
-			and run.language == language
-		then
-			local scripts = ffi.new('hb_script_t[?]', run.length)
-			detect_scripts(run.text, run.length, scripts)
-			local script
-			for i = 0, run.length-1 do
-				local sc = scripts[i]
-				if sc ~= script then
-
-				end
-			end
-		end
-	end
-	self.runs = runs
-	self.run = false
-	]]
-end
-
-function tr:itemize_text(s, len)
-
-	len = len or #s
-	local b = fb.buffers(len, nil, 'utf-8')
-
-	local s, len = fb.charset_to_unicode('utf-8', s, len, b.str, b.len)
-	assert(s, len)
-
-	local function line_offsets(s, len, b)
-		local line_brks = ub.linebreaks_utf32(b.str, len)
-		local i
-		local function next_line_break()
-			if not i then
-				i = 0
-			else
-				i = i + 1
-				while i < len and line_brks[i] ~= 0 do
-					i = i + 1
-				end
-			end
-			if i == len then
-				return
-			end
-			return i
-		end
-		return next_line_break
-	end
-
-	local s, len = fb.log2vis(s, len, 'ucs-4', b,
-		fb.C.FRIBIDI_FLAGS_DEFAULT, --no arabic shaping
-		fb.C.FRIBIDI_PAR_ON,
-		line_offsets
-	)
-	assert(s, len)
+function tr:shape_segment(s, len, dir, script, language, features)
 
 	local buf = hb.buffer()
 
-	local last_rtl = b.par_base_dir == fb.C.FRIBIDI_PAR_RTL
-	for i=0,len-1 do
-		local rtl = b.levels[i] % 2 == 1
-		if last_rtl ~= rtl then
-
-			buf:clear()
-			buf:set_direction(rtl and hb.C.HB_DIRECTION_RTL or hb.C.HB_DIRECTION_LTR)
-
-			last_rtl = rtl
-		end
-	end
-
-	--[[
-		local bidi_type_name = fb.bidi_type_name(b.bidi_types[i])
-		local joining_type_name = fb.joining_type_name(b.ar_props[i])
-		print(
-			s:sub(i+1, i+1),
-			bidi_type_name,
-			b.levels[i],
-			joining_type_name,
-			b.visual_str[i],
-			b.v_to_l[i],
-			b.l_to_v[i])
-	end
-	]]
-end
-
-function tr:shape_text(s, len, direction, script, language, features)
-
-	local buf = self.hb_buf
-	if not buf then
-		buf = hb.buffer()
-		self.hb_buf = buf
-	end
-
-	buf:set_direction(direction or hb.C.HB_DIRECTION_LTR)
-	buf:set_script(script or hb.C.HB_SCRIPT_UNKNOWN)
+	buf:set_direction(dir == 'rtl' and hb.C.HB_DIRECTION_RTL or hb.C.HB_DIRECTION_LTR)
+	buf:set_script(script)
 	if language then
 		buf:set_language(language)
 	end
 
-	buf:add_utf8(s, len)
+	buf:add_utf32(s, len)
 
 	local feats, feats_count = nil, 0
 	if features then
@@ -757,15 +521,12 @@ function tr:shape_text(s, len, direction, script, language, features)
 	end
 
 	local font = self.font
-	buf:shape(font.hb_font, feats, feats_count)
+	buf:shape_full(font.hb_font, feats, feats_count)
+
+	return buf
 end
 
-function tr:clear()
-	self.hb_buf:clear()
-end
-
-function tr:paint_text(x, y)
-	local buf = self.hb_buf
+function tr:paint_shaped_segment(buf, x, y)
 
 	local glyph_count = buf:get_length()
 	local glyph_info  = buf:get_glyph_infos()
@@ -784,6 +545,178 @@ function tr:paint_text(x, y)
 		x = x + glyph_pos[i].x_advance / 64
 		y = y - glyph_pos[i].y_advance / 64
 	end
+
+	buf:free()
+
+	return x
+end
+
+--iterate a list of values in run-length encoded form.
+local function runs(buf, len)
+	local i = 0
+	return function()
+		if i >= len then
+			return nil
+		end
+		local i1, n, val1 = i, 1, buf[i]
+		while true do
+			i = i + 1
+			if i >= len then
+				return i1, n, val1
+			end
+			local val = buf[i]
+			if val ~= val1 then
+				return i1, n, val1
+			end
+			n = n + 1
+		end
+	end
+end
+
+function tr:paint_runs(x, y)
+
+	--get text length in codepoints for each run and total.
+	local len = 0
+	for _,run in ipairs(self.runs) do
+		run.length = run.length or #run.text
+		run.charset = run.charset or 'utf8'
+		if run.charset == 'utf8' then
+			run.cp_length = utf8.decode(run.text, run.length, false)
+		elseif run.charset == 'utf32' then
+			run.cp_length = run.length
+		else
+			assert(false, 'invalid charset %s', tostring(run.charset))
+		end
+		len = len + run.cp_length
+	end
+
+	if len == 0 then
+		return
+	end
+
+	--convert and concatenate text into a utf32 buffer.
+	local str = ffi.new('uint32_t[?]', len)
+	local offset = 0
+	for _,run in ipairs(self.runs) do
+		local str = str + offset
+		if run.charset == 'utf8' then
+			utf8.decode(run.text, run.length, str, run.cp_length)
+		elseif run.charset == 'utf32' then
+			ffi.copy(str, run.text, run.cp_length * 4)
+		end
+		offset = offset + run.cp_length
+	end
+
+	--Run fribidi over the entire text as follows:
+	--Request mirroring since it's part of BiDi and harfbuzz doesn't do that.
+	--Skip arabic shaping since harfbuzz does that better with font assistance.
+	--Skip RTL reordering since it also reverses the _contents_ of the RTL runs
+	--which harfbuzz also does (we do UAX#9 line reordering separately below).
+	local dir = (self.runs.dir or 'auto'):lower()
+	dir = dir == 'rtl'  and fb.C.FRIBIDI_PAR_RTL
+		or dir == 'ltr'  and fb.C.FRIBIDI_PAR_LTR
+		or dir == 'auto' and fb.C.FRIBIDI_PAR_ON
+
+	local bidi_types    = ffi.new('FriBidiCharType[?]', len)
+	local bracket_types = ffi.new('FriBidiBracketType[?]', len)
+	local levels        = ffi.new('FriBidiLevel[?]', len)
+	local vstr          = ffi.new('FriBidiChar[?]', len)
+
+	fb.bidi_types(str, len, bidi_types)
+	fb.bracket_types(str, len, bidi_types, bracket_types)
+	local max_level, dir = assert(fb.par_embedding_levels(
+		bidi_types, bracket_types, len, dir, levels))
+	ffi.copy(vstr, str, len * 4)
+	fb.shape_mirroring(levels, len, vstr)
+
+	--reorder the RTL runs based on UAX#9, keeping the _contents_ of each
+	--run in logical order (harfbuzz will reverse the glyphs of each RTL run).
+	local first_run, last_run
+	local tlen = 0
+	for i, len, level in runs(levels, len) do
+		local run = {level = level, i = i, len = len}
+		tlen = tlen + run.len
+		if last_run then
+			last_run.next = run
+		else
+			first_run = run
+		end
+		last_run = run
+	end
+	assert(tlen == len)
+
+	local run = reorder_runs(first_run)
+
+	local vstr0, levels0 = vstr, levels
+	local vstr = ffi.new('uint32_t[?]', len)
+	local levels = ffi.new('FriBidiLevel[?]', len)
+	local i = 0
+	while run do
+		ffi.copy(vstr + i, vstr0 + run.i, run.len * 4)
+		ffi.copy(levels + i, levels0 + run.i, run.len)
+		i = i + run.len
+		run = run.next
+	end
+	assert(i == len)
+
+	--detect the script property for the entire visual text
+	local scripts = ffi.new('hb_script_t[?]', len)
+	detect_scripts(vstr, len, scripts)
+
+	--run harfbuzz over segments of compatible properties
+	local offset, rtl, script, lang, font, size
+	for i = 0, len-1 do
+		local rtl1 = levels[i] % 2 == 1
+		local script1 = scripts[i]
+		local font1 = self.font
+		local size1 = self.size_info.size
+		local lang1 = script1 == hb.C.HB_SCRIPT_ARABIC and 'ar' or 'en'
+
+		--print(i, str[i], vstr[i], levels[i], self.buffers.levels[i], lang1)
+
+		if rtl1 ~= rtl
+			or script1 ~= script
+			or lang1 ~= lang
+			or font1 ~= font
+			or size1 ~= size
+		then
+
+			if offset then
+
+				local buf = self:shape_segment(
+					vstr + offset, i - offset,
+					rtl and 'rtl' or 'ltr',
+					script,
+					lang,
+					nil)
+
+				x = self:paint_shaped_segment(buf, x, y)
+
+			end
+
+			rtl = rtl1
+			script = script1
+			lang = lang1
+			font = font1
+			size = size1
+			offset = i
+		end
+
+	end
+
+	if offset < len-1 then
+
+		local buf = self:shape_segment(
+			vstr + offset, len - offset,
+			rtl and 'rtl' or 'ltr',
+			script,
+			lang,
+			nil)
+
+		self:paint_shaped_segment(buf, x, y)
+	end
+
+	self.runs = false
 end
 
 --text markup parser ---------------------------------------------------------
