@@ -81,12 +81,12 @@ function win:repaint()
 
 	elseif false then
 
-		local runs = tr:shape{
+		local segs = tr:shape{
 			('\xF0\x9F\x98\x81'):rep(2), font_name = 'NotoColorEmoji,34',
 		}
 		local x, y, w, h = 100, 100, 80, 80
 		rect(cr, x, y, w, h)
-		tr:paint(runs, x, y, w, h, 'center', 'bottom')
+		tr:paint(segs, x, y, w, h, 'center', 'bottom')
 
 	elseif true then
 
@@ -97,10 +97,9 @@ function win:repaint()
 			--local s1 = ('gmmI '):rep(1)
 			--local s2 = ('fi AV (ثلاثة 1234 خمسة) '):rep(1)
 			--local s3 = ('Hebrew (אדםה (adamah))'):rep(1)
-			self.runs = self.runs or tr:shape{
+			local segs = tr:shape{
 				font_name = 'open sans,14',
 				--font_name = 'amiri,20',
-				line_spacing = 1,
 				--dir = 'rtl',
 				--{'A'},
 				{s
@@ -113,9 +112,7 @@ function win:repaint()
 
 			local x, y, w, h = box2d.offset(-50, 0, 0, win:client_size())
 			rect(cr, x, y, w, h)
-			tr:paint(self.runs, x, y, w, h, 'center', 'bottom')
-			self.runs:free()
-			self.runs = false
+			tr:paint(segs, x, y, w, h, 'center', 'bottom')
 		end
 
 		local s = (time.clock() - t0) / n
@@ -124,6 +121,8 @@ function win:repaint()
 	end
 
 	ii=ii+1/60
+	print(string.format('word  cache size:  %d KB', tr.glyph_runs.total_size / 1024))
+	print(string.format('word  count:       %d   ', tr.glyph_runs.lru.length))
 	print(string.format('glyph cache size:  %d KB', tr.rs.glyphs.total_size / 1024))
 	print(string.format('glyph count:       %d   ', tr.rs.glyphs.lru.length))
 	--self:invalidate()
