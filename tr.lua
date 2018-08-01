@@ -16,6 +16,7 @@ local lrucache = require'lrucache'
 local tuple = require'tuple'
 local detect_scripts = require'tr_shape_script'
 local reorder_runs = require'tr_shape_reorder'
+local zone = require'jit.zone' --glue.noop
 
 local band = bit.band
 local push = table.insert
@@ -114,7 +115,7 @@ function tr:add_mem_font(...)
 	return override_font(self.rs:add_mem_font(...))
 end
 
-function tr:paint_glyph_run(run, x, y)
+function tr:paint_glyph_run(cr, run, x, y)
 
 	local font = run.font
 	local font_size = run.font_size
@@ -136,7 +137,7 @@ function tr:paint_glyph_run(run, x, y)
 		x = x + glyph_pos[i].x_advance / 64
 		y = y - glyph_pos[i].y_advance / 64
 
-		self.rs:paint_glyph(glyph, bmpx, bmpy)
+		self.rs:paint_glyph(cr, glyph, bmpx, bmpy)
 	end
 
 	return x, y
@@ -300,9 +301,12 @@ end
 
 function tr:shape(text_tree)
 
+	zone'shape'
+
 	local text_runs = flatten_text_tree(text_tree, {})
 
 	--decode utf8 text, compile (font, size) and get text length in codepoints.
+	zone'len'
 	local len = 0
 	for _,run in ipairs(text_runs) do
 
@@ -317,7 +321,7 @@ function tr:shape(text_tree)
 		assert(run.font_size, 'Font size missing')
 		run.font_size = snap(run.font_size, self.rs.font_size_resolution)
 
-		--decode utf8 text.
+		--find length in codepoints of each run.
 		run.text_size = run.text_size or #run.text
 		assert(run.text_size, 'text buffer size missing')
 		run.charset = run.charset or 'utf8'
@@ -331,12 +335,15 @@ function tr:shape(text_tree)
 
 		len = len + run.len
 	end
+	zone()
 
 	if len == 0 then
+		zone()
 		return {}
 	end
 
 	--convert and concatenate text into a utf32 buffer.
+	zone'decode'
 	str = realloc(str, 'uint32_t[?]', len)
 	local offset = 0
 	for _,run in ipairs(text_runs) do
@@ -349,13 +356,17 @@ function tr:shape(text_tree)
 		run.offset = offset
 		offset = offset + run.len
 	end
+	zone()
 
 	--detect the script and lang properties for each char of the entire text.
 	scripts = realloc(scripts, 'hb_script_t[?]', len)
 	langs = realloc(langs, 'hb_language_t[?]', len)
+	zone'detect_script'
 	detect_scripts(str, len, scripts)
+	zone()
 
 	--override scripts and langs with user-provided values.
+	zone'script_lang_override'
 	for _,run in ipairs(text_runs) do
 		if run.script then
 			local script = hb.script(run.script)
@@ -372,12 +383,14 @@ function tr:shape(text_tree)
 			end
 		end
 	end
+	zone()
 
 	--Run fribidi over the entire text as follows:
 	--Request mirroring since it's part of BiDi and harfbuzz doesn't do that.
 	--Skip arabic shaping since harfbuzz does that better with font assistance.
 	--Skip RTL reordering since it also reverses the _contents_ of the RTL runs
 	--which harfbuzz also does (we do reordering separately below).
+	zone'bidi'
 	local dir = (text_tree.dir or 'auto'):lower()
 	dir = dir == 'rtl'  and fb.C.FRIBIDI_PAR_RTL
 		or dir == 'ltr'  and fb.C.FRIBIDI_PAR_LTR
@@ -395,14 +408,17 @@ function tr:shape(text_tree)
 	assert(max_level, dir)
 	ffi.copy(vstr, str, len * 4)
 	fb.shape_mirroring(levels, len, vstr)
+	zone()
 
 	--run Unicode line breaking algorithm over each run of text with same language.
+	zone'lbreak'
 	linebreaks = realloc(linebreaks, 'char[?]', len)
 	for i, len, lang in runs(langs, len, 0) do
 		local lang = hb.language_tostring(lang)
 		lang = lang and lang:sub(1, 2)
 		ub.linebreaks(vstr + i, len, lang, linebreaks + i)
 	end
+	zone()
 
 	--make an iterator of text segments which share the same text properties
 	--for the purpose of shaping them separately.
@@ -492,6 +508,7 @@ function tr:shape(text_tree)
 	end
 
 	--shape the text segments.
+	zone'hb_shape'
 	local segments = {}
 	for
 		i, len,
@@ -514,12 +531,14 @@ function tr:shape(text_tree)
 
 		push(segments, segment)
 	end
+	zone()
 
 	len0 = len
+	zone()
 	return segments
 end
 
-function tr:paint(segments, x0, y0, w, h, halign, valign)
+function tr:paint(cr, segments, x0, y0, w, h, halign, valign)
 
 	halign = halign or 'left'
 	valign = valign or 'top'
@@ -528,7 +547,10 @@ function tr:paint(segments, x0, y0, w, h, halign, valign)
 		return
 	end
 
+	zone'paint'
+
 	--do line wrapping.
+	zone'wrap'
 	local lines = {}
 	local line
 	for i,seg in ipairs(segments) do
@@ -546,6 +568,7 @@ function tr:paint(segments, x0, y0, w, h, halign, valign)
 			line = nil
 		end
 	end
+	zone()
 
 	--compute total line height.
 	local lines_h = 0
@@ -554,6 +577,7 @@ function tr:paint(segments, x0, y0, w, h, halign, valign)
 	end
 
 	--reorder RTL segments on each line separately, and concatenate the runs.
+	zone'reorder'
 	for _,line in ipairs(lines) do
 		local n = #line
 		for i,seg in ipairs(line) do
@@ -568,6 +592,7 @@ function tr:paint(segments, x0, y0, w, h, halign, valign)
 		end
 		assert(i == n)
 	end
+	zone()
 
 	--compute first line's baseline based on vertical alignment.
 	local x, y = x0, y0
@@ -585,6 +610,7 @@ function tr:paint(segments, x0, y0, w, h, halign, valign)
 	end
 
 	--paint the glyph runs.
+	zone'paint'
 	local line_y = y
 	for i,line in ipairs(lines) do
 		local x
@@ -599,11 +625,13 @@ function tr:paint(segments, x0, y0, w, h, halign, valign)
 		end
 		local y = line_y
 		for _,seg in ipairs(line) do
-			x, y = self:paint_glyph_run(seg.run, x, y)
+			x, y = self:paint_glyph_run(cr, seg.run, x, y)
 		end
 		line_y = line_y + (lines[i+1] and lines[i+1].h or 0)
 	end
+	zone()
 
+	zone()
 end
 
 return tr
