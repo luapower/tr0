@@ -10,7 +10,6 @@ local glue = require'glue'
 local lrucache = require'lrucache'
 local ft = require'freetype'
 local font_db = require'tr_font_db'
-local tuple = require'tuple'
 local zone = require'jit.zone' --glue.noop
 
 local band, bor = bit.band, bit.bor
@@ -162,7 +161,7 @@ setmetatable(mem_font, mem_font)
 function mem_font:load()
 	assert(not self.ft_face)
 	self.ft_face = assert(self.freetype:memory_face(self.data, self.data_size))
-	self.tuple = tuple.fast_space()
+	self.tuple = glue.tuples()
 end
 
 function mem_font:unload()
