@@ -163,10 +163,12 @@ function mem_font:load()
 	assert(not self.ft_face)
 	self.ft_face = assert(self.freetype:memory_face(self.data, self.data_size))
 	self.tuple = tuples()
+	self.tuple2 = tuples(2) --faster impl. with 2 fixed args
 end
 
 function mem_font:unload()
 	self.tuple = false
+	self.tuple2 = false
 	self.ft_face:free()
 	self.ft_face = false
 end
@@ -351,7 +353,7 @@ function rs:glyph_metrics(font, font_size, glyph_index)
 		return empty_glyph_metrics
 	end
 	font_size = snap(font_size, self.font_size_resolution)
-	local glyph_key = font.tuple(font_size, glyph_index)
+	local glyph_key = font.tuple2(font_size, glyph_index)
 	local glyph = self.glyphs:get(glyph_key)
 	if not glyph then
 		glyph = self:load_glyph_metrics(font, font_size, glyph_index)
