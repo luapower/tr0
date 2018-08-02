@@ -18,6 +18,7 @@ local assert = glue.assert --assert with string formatting
 local snap = glue.snap
 local pass = glue.pass
 local round = glue.round
+local tuples = glue.tuples
 
 --glyph rasterizer -----------------------------------------------------------
 
@@ -161,7 +162,7 @@ setmetatable(mem_font, mem_font)
 function mem_font:load()
 	assert(not self.ft_face)
 	self.ft_face = assert(self.freetype:memory_face(self.data, self.data_size))
-	self.tuple = glue.tuples()
+	self.tuple = tuples()
 end
 
 function mem_font:unload()
