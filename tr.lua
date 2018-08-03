@@ -25,6 +25,7 @@ local assert = glue.assert --assert with string formatting
 local count = glue.count
 local clamp = glue.clamp
 local snap = glue.snap
+local binsearch = glue.binsearch
 local bounding_box = box2d.bounding_box
 local hit_box = box2d.hit
 local odd = function(x) return band(x, 1) == 1 end
@@ -59,7 +60,7 @@ setmetatable(tr, tr)
 
 tr.glyph_run_cache_size = 1024^2 * 10 --10MB net (arbitrary default)
 
-tr.rasterizer_module = 'tr_raster_cairo'
+tr.rasterizer_module = 'tr_raster_cairo' --who does rs:paint_glyph()
 
 function tr:create_rasterizer()
 	return require(self.rasterizer_module)()
@@ -210,22 +211,25 @@ function tr:shape_text_run(
 	local glyph_pos   = hb_buf:get_glyph_positions()
 
 	zone'hb_shape_metrics'
-	local ax, ay = 0, 0
 	local bx, by, bw, bh = 0, 0, 0, 0
-	local bx0, by0
+	local ax, ay = 0, 0
 	for i = 0, glyph_count-1 do
+
+		local px = ax + glyph_pos[i].x_offset
+		local py = ay - glyph_pos[i].y_offset
+
 		local m = self.rs:glyph_metrics(font, font_size, glyph_info[i].codepoint)
-		if i == 0 then
-			bx0 = m.bearing_x
-			by0 = m.bearing_y
-		end
 		bx, by, bw, bh = bounding_box(bx, by, bw, bh,
-			ax + m.bearing_x,
-			ay + m.bearing_y,
-			m.w,
-			m.h)
-		ax = ax + glyph_pos[i].x_advance / 64
-		ay = ay - glyph_pos[i].y_advance / 64
+			px / 64 + m.bearing_x,
+			py / 64 - m.bearing_y,
+			m.w, m.h)
+
+		ax = ax + glyph_pos[i].x_advance
+		ay = ay - glyph_pos[i].y_advance
+
+		--make offsets absolute!
+		glyph_pos[i].x_offset = px
+		glyph_pos[i].y_offset = py
 	end
 	zone()
 
@@ -235,15 +239,15 @@ function tr:shape_text_run(
 		font_size = font_size,
 		hb_buf = hb_buf,
 		--for layouting
-		w = bw, --also for hit-testing
-		h = bh,
-		bearing_x = bx0,
-		bearing_y = by0,
-		advance_x = ax,
-		advance_y = ay,
-		font_height = font.height,
+		advance_x = ax / 64,
+		advance_y = ay / 64,
 		font_ascent = font.ascent,
 		font_descent = font.descent,
+		--for hit testing
+		x = bx,
+		y = by,
+		w = bw,
+		h = bh,
 		--for lru cache
 		free = free_glyph_run,
 		mem_size =
@@ -487,7 +491,7 @@ function tr.segments:layout(x, y, w, h, halign, valign)
 		return
 	end
 
-	--do line wrapping.
+	--do line wrapping and compute some line metrics.
 	zone'linewrap'
 	local lines = update({tr = self.tr, segments = self}, self.tr.lines)
 	local line
@@ -498,7 +502,9 @@ function tr.segments:layout(x, y, w, h, halign, valign)
 		end
 		line.w = line.advance_x + seg.run.w
 		line.advance_x = line.advance_x + seg.run.advance_x
-		line.h = math.max(line.h, seg.run.font_height * (seg.line_spacing or 1))
+		line.h = math.max(line.h,
+			(seg.run.font_ascent - seg.run.font_descent)
+			* (seg.line_spacing or 1))
 		line.ascent = math.max(line.ascent, seg.run.font_ascent)
 		line.descent = math.min(line.descent, seg.run.font_descent)
 		push(line, seg)
@@ -507,12 +513,6 @@ function tr.segments:layout(x, y, w, h, halign, valign)
 		end
 	end
 	zone()
-
-	--compute total line height.
-	lines.h = 0
-	for _,line in ipairs(lines) do
-		lines.h = lines.h + line.h
-	end
 
 	--reorder RTL segments on each line separately, and concatenate the runs.
 	zone'reorder'
@@ -532,6 +532,20 @@ function tr.segments:layout(x, y, w, h, halign, valign)
 	end
 	zone()
 
+	--compute more line metrics.
+	lines.h = 0
+	for i,line in ipairs(lines) do
+		if halign == 'left' then
+			line.x = 0
+		elseif halign == 'right' then
+			line.x = w - line.w
+		elseif halign == 'center' then
+			line.x = (w - line.w) / 2
+		end
+		line.y = i > 1 and lines[i-1].y + line.h or 0
+		lines.h = lines.h + line.h
+	end
+
 	--compute first line's baseline based on vertical alignment.
 	if valign == 'top' then
 		lines.baseline = lines[1].ascent
@@ -542,17 +556,14 @@ function tr.segments:layout(x, y, w, h, halign, valign)
 			+ lines[1].ascent + lines[#lines].descent) / 2
 	end
 
-	lines.w = w
-	lines.halign = halign
-
-	lines.y = y
 	lines.x = x
+	lines.y = y
 
 	zone()
 	return lines
 end
 
-function tr.segments:paint_segment(seg, x, y, rs, cr)
+function tr.segments.paint_segment(seg, line, x, y, rs, cr)
 	local run = seg.run
 	local hb_buf = run.hb_buf
 
@@ -561,51 +572,92 @@ function tr.segments:paint_segment(seg, x, y, rs, cr)
 	local glyph_pos   = hb_buf:get_glyph_positions()
 
 	for i = 0, glyph_count-1 do
+
 		local glyph_index = glyph_info[i].codepoint
 
+		--glyph's origin
 		local px = x + glyph_pos[i].x_offset / 64
-		local py = y - glyph_pos[i].y_offset / 64
+		local py = y + glyph_pos[i].y_offset / 64
 
 		local glyph, bmpx, bmpy = rs:glyph(
 			run.font, run.font_size, glyph_index, px, py)
-
-		x = x + glyph_pos[i].x_advance / 64
-		y = y - glyph_pos[i].y_advance / 64
 
 		rs:paint_glyph(cr, glyph, bmpx, bmpy)
 	end
 end
 
-function tr.segments:hit_test_segment(seg, x, y, mx, my)
-	local run = seg.run
-	local x, y, w, h = x - run.bearing_x, y - run.bearing_y, run.w, run.h
-	if hit_box(mx, my, x, y, w, h) then
-		return seg, x, y, w, h
+tr.lines = {} --methods for lines
+
+local function cmp_ys(line, y)
+	return line.y - line.descent < y
+end
+function tr.lines:hit_test_line(x, y, extend)
+	x = x - self.x
+	y = y - (self.y + self.baseline)
+	if y < -self[1].ascent then
+		return extend and 1 or nil
+	elseif y > self[#self].y - self[#self].descent then
+		return extend and #self or nil
+	else
+		local i = binsearch(y, self, cmp_ys) or #self
+		local line = self[i]
+		return extend or (
+				y >= line.y - line.ascent
+				and x >= line.x and x <= line.x + line.w
+			) and i or nil
 	end
 end
 
---function tr.segments:
+function tr.lines.hit_test_segment(seg, x, y, mx, my, rs, extend_x, extend_y)
+	local run = seg.run
+	local bx, bw = self.x + x + run.x, run.w
+	local by, bh = self.y + y + run.y, run.h
+	if hit_box(mx, my, bx, by, bw, bh) then
 
-tr.lines = {} --methods for lines
+		local run = seg.run
+		local hb_buf = run.hb_buf
 
-function tr.lines:each_segment(f, ...)
-	local halign = self.halign
-	local y = self.y + self.baseline
-	for i, line in ipairs(self) do
-		local x = self.x
-		if halign == 'right' then
-			x = x + self.w - line.w
-		elseif halign == 'center' then
-			x = x + (self.w - line.w) / 2
-		end
-		for _,seg in ipairs(line) do
-			local ret, bx, by, bw, bh = f(self, seg, x, y, ...)
-			if ret ~= nil then
-				return ret, bx, by, bw, bh
+		local glyph_count = hb_buf:get_length()
+		local glyph_info  = hb_buf:get_glyph_infos()
+		local glyph_pos   = hb_buf:get_glyph_positions()
+
+		local hit_i
+		local hit_d2 = 1/0
+		local hbx, hby, hbw, hbh
+
+		for i = 0, glyph_count-1 do
+
+			local glyph_index = glyph_info[i].codepoint
+
+			--glyph's origin
+			local px = x + glyph_pos[i].x_offset / 64
+			local py = y + glyph_pos[i].y_offset / 64
+
+			local m = rs:glyph_metrics(run.font, run.font_size, glyph_index)
+
+			--glyph's bounding box
+			local bx, by, bw, bh =
+				px + m.bearing_x,
+				py - m.bearing_y,
+				m.w, m.h
+
+			--glyph's center
+			local cx = bx + bw / 2
+			local cy = by + bh / 2
+
+			--distance^2 to glyph's center
+			local d2 = (mx - cx)^2 + (my - cy)^2
+
+			--pick if distance to center is closer than prev one found.
+			if d2 < hit_d2 then
+				hit_i = i
+				hit_d2 = d2
+				hbx, hby, hbw, hbh = bx, by, bw, bh
 			end
-			x = x + seg.run.advance_x
+
 		end
-		y = y + (self[i+1] and self[i+1].h or 0)
+
+		return seg, hit_i, hbx, hby, hbw, hbh
 	end
 end
 
@@ -620,8 +672,29 @@ function tr:textbox(text_tree, cr, x, y, w, h, halign, valign)
 		:paint(cr)
 end
 
-function tr.lines:hit_test(x, y, mx, my)
-	return self:each_segment(self.segments.hit_test_segment, mx, my)
+function tr.lines:hit_test(mx, my, expand)
+	local i = self:hit_test_line(mx, my, expand)
+	if not i then return nil end
+	local line = self[i]
+	--[[
+	return true, 0,
+		self.x + line.x,
+		self.y + self.baseline + line.y - line.ascent,
+		line.w,
+		line.ascent - line.descent
+	]]
+	local y = self.y + self.baseline
+	for i, line in ipairs(self) do
+		local x = self.x + line.x
+		for _,seg in ipairs(line) do
+			local ret, i, bx, by, bw, bh = f(seg, line, x, y, ...)
+			if ret ~= nil then
+				return ret, i, bx, by, bw, bh
+			end
+			x = x + seg.run.advance_x
+		end
+		y = y + (self[i+1] and self[i+1].h or 0)
+	end
 end
 
 return tr

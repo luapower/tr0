@@ -10,6 +10,23 @@ local tr = tr()
 
 nw:app():maxfps(1/0)
 
+local function fps_function()
+	local count_per_sec = 2
+	local frame_count, last_frame_count, last_time = 0, 0
+	return function()
+		last_time = last_time or time.clock()
+		frame_count = frame_count + 1
+		local time = time.clock()
+		if time - last_time > 1 / count_per_sec then
+			last_frame_count, frame_count = frame_count, 0
+			last_time = time
+		end
+		return last_frame_count * count_per_sec
+	end
+end
+
+local fps = fps_function()
+
 local win = nw:app():window{
 	x = 100, y = 60,
 	w = 1800, h = 900,
@@ -56,9 +73,13 @@ end
 local text = require'glue'.readfile('winapi_history.md')
 
 function win:repaint()
+	self:title(string.format('%d fps', fps()))
+
 	local cr = self:bitmap():cairo()
 	--cr:rgb(1, 1, 1); cr:paint(); cr:rgb(0, 0, 0)
 	cr:rgb(0, 0, 0); cr:paint(); cr:rgb(1, 1, 1)
+
+	local t0 = time.clock()
 
 	if false then
 
@@ -71,7 +92,6 @@ function win:repaint()
 
 	elseif true then
 
-		local t0 = time.clock()
 		--local s1 = ('gmmI '):rep(1)
 		--local s2 = ('fi AV (ثلاثة 1234 خمسة) '):rep(1)
 		--local s3 = ('Hebrew (אדםה (adamah))'):rep(1)
@@ -79,12 +99,13 @@ function win:repaint()
 		local x, y, w, h = box2d.offset(-50, 0, 0, win:client_size())
 		rect(cr, x, y, w, h)
 
-		self.segs = tr:shape{
-			font_name = 'open sans,14',
+		self.segs = self.segs or tr:shape{
+			font_name = 'open sans,54',
+			line_spacing = 2,
 			--font_name = 'amiri,20',
 			--dir = 'rtl',
 			--{'A'},
-			{text
+			{'ABC lllmmmMM mmm iii\nDEF glm\n'
 				, {''..('\xF0\x9F\x98\x81'):rep(3)..'', font_name = 'NotoColorEmoji,34'}
 			}
 			--{('ABCD efghi jkl 12345678 '):rep(500)},
@@ -98,22 +119,20 @@ function win:repaint()
 			rect(cr, unpack(self.rr))
 		end
 
-		local s = (time.clock() - t0)
-		print(string.format('%0.2f ms    %d fps', s * 1000, 1 / s))
 	end
 
-	print(string.format('word  cache size:  %d KB', tr.glyph_runs.total_size / 1024))
-	print(string.format('word  count:       %d   ', tr.glyph_runs.lru.length))
-	print(string.format('glyph cache size:  %d KB', tr.rs.glyphs.total_size / 1024))
-	print(string.format('glyph count:       %d   ', tr.rs.glyphs.lru.length))
+	--local s = (time.clock() - t0)
+	--print(string.format('%0.2f ms    %d fps', s * 1000, 1 / s))
+	--print(string.format('word  cache size:  %d KB', tr.glyph_runs.total_size / 1024))
+	--print(string.format('word  count:       %d   ', tr.glyph_runs.lru.length))
+	--print(string.format('glyph cache size:  %d KB', tr.rs.glyphs.total_size / 1024))
+	--print(string.format('glyph count:       %d   ', tr.rs.glyphs.lru.length))
+	self:invalidate()
 end
 
 function win:mousemove(mx, my)
 	if not self.lines then return end
-
-	local x, y, w, h = box2d.offset(-50, 0, 0, win:client_size())
-
-	local seg, x, y, w, h = self.lines:hit_test(x, y, mx, my)
+	local seg, i, x, y, w, h = self.lines:hit_test(mx, my)
 	if seg then
 		self.rr = {x, y, w, h}
 	else
