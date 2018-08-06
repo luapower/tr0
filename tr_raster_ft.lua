@@ -28,7 +28,7 @@ setmetatable(rs, rs)
 rs.glyph_cache_size = 1024^2 * 10 --10MB net (arbitrary default)
 rs.font_size_resolution = 1/8 --in pixels
 rs.subpixel_x_resolution = 1/16 --1/64 pixels is max with freetype
-rs.subpixel_y_resolution = 1 --no subpixel positioning with vertical hinting
+rs.subpixel_y_resolution = 1/16 --no subpixel positioning with vertical hinting
 
 function rs:__call()
 	local self = update({}, self)
@@ -216,8 +216,9 @@ end
 rs.ft_load_flags = bor(
 	ft.C.FT_LOAD_COLOR,
 	ft.C.FT_LOAD_PEDANTIC,
-	ft.C.FT_LOAD_NO_HINTING
-	--ft.C.FT_LOAD_FORCE_AUTOHINT
+	--ft.C.FT_LOAD_NO_HINTING
+	--ft.C.FT_LOAD_NO_AUTOHINT
+	ft.C.FT_LOAD_FORCE_AUTOHINT
 )
 
 function rs:load_glyph(font, font_size, glyph_index)
@@ -251,7 +252,7 @@ function rs:rasterize_glyph(font, font_size, glyph_index, offset_x, offset_y)
 	end
 
 	if ft_glyph.format == ft.C.FT_GLYPH_FORMAT_OUTLINE then
-		ft_glyph.outline:translate(offset_x * 64, offset_y * 64)
+		ft_glyph.outline:translate(offset_x * 64, -offset_y * 64)
 	end
 	local fmt = ft_glyph.format
 	if ft_glyph.format ~= ft.C.FT_GLYPH_FORMAT_BITMAP then

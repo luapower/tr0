@@ -5,6 +5,7 @@ local bundle = require'bundle'
 local gfonts = require'gfonts'
 local time = require'time'
 local box2d = require'box2d'
+local color = require'color'
 
 local tr = tr()
 
@@ -63,12 +64,22 @@ font'media/fonts/amiri-regular.ttf'
 
 --tr.rs.font_db:dump()
 
-local function rect(cr, r, g, b, x, y, w, h)
+local function rect(cr, col, x, y, w, h)
+	local r, g, b, a = color.parse(col, 'rgb')
 	cr:save()
 	cr:rectangle(x, y, w, h)
 	cr:line_width(1)
-	cr:rgb(r, g, b)
+	cr:rgba(r, g, b, a or 1)
 	cr:stroke()
+	cr:restore()
+end
+
+local function dot(cr, col, x, y, size)
+	local r, g, b, a = color.parse(col, 'rgb')
+	cr:save()
+	cr:circle(x, y, size or 5)
+	cr:rgba(r, g, b, a or 1)
+	cr:fill()
 	cr:restore()
 end
 
@@ -89,7 +100,7 @@ function win:repaint()
 			('\xF0\x9F\x98\x81'):rep(2), font_name = 'NotoColorEmoji,34',
 		}
 		local x, y, w, h = 100, 100, 80, 80
-		rect(cr, .5, .5, .5, x, y, w, h)
+		rect(cr, '#888', x, y, w, h)
 		tr:paint(cr, segs, x, y, w, h, 'center', 'bottom')
 
 	elseif true then
@@ -99,25 +110,54 @@ function win:repaint()
 		--local s3 = ('Hebrew (אדםה (adamah))'):rep(1)
 
 		local x, y, w, h = box2d.offset(-50, 0, 0, win:client_size())
-		rect(cr, .5, .5, .5, x, y, w, h)
+		rect(cr, '#888', x, y, w, h)
 
 		self.segs = self.segs or tr:shape{
-			line_spacing = 1.2,
+			line_spacing = 1.5,
 			--dir = 'rtl',
 			--{'A'},
-			{font_name = 'eb garamond, 200', 'Dgt DD\nDD Dg'},
+			--{font_name = 'eb garamond, 200', 'BDgt ffi fi D\nTd VA Dg'},
+			{font_name = 'open sans, 200', 'BDgt ffi fi D\nTd VA Dg'},
 			--{font_name = 'amiri,200', 'خمسة المفاتيح ABC\n'},
 			--{font_name = 'eb garamond, 200', 'fa AVy ffi fl lg MM f\nDEF EF F D glm\n'},
 			--{font_name = 'NotoColorEmoji,34', ('\xF0\x9F\x98\x81'):rep(3)},
 		}
-		self.lines = self.segs:layout(x, y, w, h, 'center', 'bottom')
+		self.lines = self.segs:layout(x, y, w, h, 'center', 'middle')
 		self.lines:paint(cr)
 
-		if self.rr then
-			rect(cr, 1, 1, 0, unpack(self.rr))
-			rect(cr, 1, 0, 0, unpack(self.rr1))
-			rect(cr, 1, 1, 1, unpack(self.rr2))
-			rect(cr, 1, 0, 1, unpack(self.rr3))
+		local x = self.lines.x
+		local y = self.lines.y + self.lines.baseline
+		for i,line in ipairs(self.lines) do
+			local hit = self.hit_line_i == i
+			local x = x + line.x
+			local y = y + line.y
+			rect(cr, hit and '#f22' or '#222', x + line.hlsb, y, line.w, -line.spacing_ascent)
+			rect(cr, hit and '#f22' or '#022', x + line.hlsb, y, line.w, -line.spacing_descent)
+			rect(cr, hit and '#fff' or '#888', x + line.hlsb, y, line.w, -line.ascent)
+			rect(cr, hit and '#0ff' or '#088', x + line.hlsb, y, line.w, -line.descent)
+			dot(cr, '#ff0', x + line.advance_x, y, 8)
+			local ax = x
+			local ay = y
+			for i,seg in ipairs(line) do
+				local run = seg.run
+				local hit = hit and self.hit_seg_i == i
+				rect(cr, hit and '#f00' or '#555', ax + run.hlsb, ay + run.htsb, run.w, run.h)
+				dot(cr, '#f0f', ax, ay, 6)
+				for i, glyph_index, px, py in seg.run:glyphs() do
+					local hit = hit and self.hit_glyph_i == i
+					local m = seg.run:glyph_metrics(glyph_index)
+					dot(cr, '#0ff', ax + px, ay + py, 4)
+					if hit then
+						rect(cr, '#fff', ax + px - 1, ay, 2, -line.ascent)
+					end
+				end
+				dot(cr, '#0ff', ax + seg.run.advance_x, ay, 4)
+				local hit = hit and self.hit_glyph_i == seg.run.hb_buf:get_length()
+				if hit then
+					rect(cr, '#fff', ax + seg.run.advance_x - 1, ay, 2, -line.ascent)
+				end
+				ax = ax + run.advance_x
+			end
 		end
 
 	end
@@ -133,20 +173,7 @@ end
 
 function win:mousemove(mx, my)
 	if not self.lines then return end
-	local line_i, seg,
-		x, y, w, h,
-		x1, y1, w1, h1,
-		x2, y2, w2, h2,
-		x3, y3, w3, h3
-			= self.lines:hit_test(mx, my)
-	if seg then
-		self.rr = {x, y, w, h}
-		self.rr1 = {x1, y1, w1, h1}
-		self.rr2 = {x2, y2, w2, h2}
-		self.rr3 = {x3, y3, w3, h3}
-	else
-		self.rr = false
-	end
+	self.hit_line_i, self.hit_seg_i, self.hit_glyph_i = self.lines:hit_test(mx, my)
 	self:invalidate()
 end
 

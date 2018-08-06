@@ -119,6 +119,7 @@ function tr:add_mem_font(...)
 	return override_font(self.rs:add_mem_font(...))
 end
 
+--convert a Lua table into an array of hb_feature_t.
 local function hb_feature_list(features)
 	local feats_count = count(features)
 	if feats_count == 0 then return nil end
@@ -132,8 +133,8 @@ local function hb_feature_list(features)
 	return feats, feats_count
 end
 
---convert a tree of nested text runs with inherited properties into a flat
---list of runs with properties resolved.
+--convert a tree of nested text runs into a flat list of runs with properties
+--dynamically inherited from the parent nodes.
 local function flatten_text_tree(parent, runs)
 	for _,run_or_text in ipairs(parent) do
 		local run
@@ -153,6 +154,8 @@ local function flatten_text_tree(parent, runs)
 	end
 	return runs
 end
+
+--static, auto-growing temp buffers used for shaping.
 
 local len0 = 0
 
@@ -177,19 +180,53 @@ function tr:free()
 	tr_free(self)
 end
 
-local function free_glyph_run(self)
+--shaping of a single text run into an array of glyphs
+
+local glyph_run = {} --glyph run methods
+tr.glyph_run_class = glyph_run
+
+function glyph_run:free()
 	self.hb_buf:free()
 	self.hb_buf = false
 	self.font:unref()
 	self.font = false
 end
 
+function glyph_run:glyphs()
+
+	local hb_buf = self.hb_buf
+
+	local glyph_count = hb_buf:get_length()
+	local glyph_info  = hb_buf:get_glyph_infos()
+	local glyph_pos   = hb_buf:get_glyph_positions()
+
+	local i = -1
+	return function()
+		i = i + 1
+		if i == glyph_count then
+			return nil
+		end
+
+		local glyph_index = glyph_info[i].codepoint
+
+		--glyph origin relative to the start of the run.
+		local px = glyph_pos[i].x_offset / 64
+		local py = glyph_pos[i].y_offset / 64
+
+		return i, glyph_index, px, py
+	end
+end
+
+function glyph_run:glyph_metrics(glyph_index)
+	return self.tr.rs:glyph_metrics(self.font, self.font_size, glyph_index)
+end
+
 local hb_glyph_size =
 	ffi.sizeof'hb_glyph_info_t'
 	+ ffi.sizeof'hb_glyph_position_t'
 
-local function isspace(c)
-	return c == 10 or c == 13 --or c == 32
+local function isnewline(c)
+	return c == 10 or c == 13
 end
 
 function tr:shape_text_run(
@@ -206,6 +243,13 @@ function tr:shape_text_run(
 	hb_buf:set_script(script)
 	hb_buf:set_language(lang)
 
+	--ignore trailing line breaks, if any
+	for i = len-1, 0, -1 do
+		if isnewline(vstr[vstr_i+i]) then
+			len = len - 1
+		end
+	end
+
 	hb_buf:add_utf32(vstr + vstr_i, len)
 
 	zone'hb_shape_full'
@@ -218,23 +262,10 @@ function tr:shape_text_run(
 
 	zone'hb_shape_metrics'
 	local bx, by, bw, bh = 0, 0, 0, 0 --bounding box
-	local ax, ay = 0, 0 --advance
+	local ax, ay = 0, 0 --glyph advance
+	for i = 0, glyph_count-1 do
 
-	--find glyph range (i1, i2) of trimmed text.
-	local i1 = 0
-	local i2 = 0
-	for i = glyph_count-1, 0, -1 do
-		local cluster = glyph_info[i].cluster
-		local char = vstr[vstr_i + cluster]
-		if not isspace(char) then
-			i2 = i
-			break
-		end
-	end
-
-	for i = i1, i2 do
-
-		--glyph origin
+		--glyph origin relative to the start of the run.
 		local px = ax + glyph_pos[i].x_offset
 		local py = ay - glyph_pos[i].y_offset
 
@@ -253,35 +284,33 @@ function tr:shape_text_run(
 		glyph_pos[i].x_offset = px
 		glyph_pos[i].y_offset = py
 	end
-
 	zone()
 
-	local glyph_run = {
-		--for painting
+	local glyph_run = update({
+		tr = self,
+		--for glyph painting
 		font = font,
 		font_size = font_size,
 		hb_buf = hb_buf,
-		i1 = i1, i2 = i2,
-		--for layouting
+		--for positioning in horizontal flow
 		advance_x = ax / 64,
+		--for positioning in vertical flow (NYI)
 		advance_y = ay / 64,
+		--for vertical alignment, line spacing and line hit-testing
 		ascent = font.ascent,
 		descent = font.descent,
-		--for hit testing
-		hlsb = bx,
-		htsb = by,
+		--for horizontal alignment and for line wrapping
+		hlsb = bx, --left-side-bearing for horizontal flow
+		htsb = by, --top-side bearing for horizontal flow
 		w = bw,
 		h = bh,
 		--for lru cache
-		free = free_glyph_run,
 		mem_size =
 			224 --hb_buffer_t
 			+ 200 --this table
 			+ 4 * len --input text
 			+ hb_glyph_size * glyph_count, --output glyphs
-		--for debugging
-		--text = ffi.string(utf8.encode(vstr + i, len)),
-	}
+	}, self.glyph_run_class)
 
 	return glyph_run
 end
@@ -340,7 +369,7 @@ function tr:shape(text_tree)
 		len = len + run.len
 	end
 
-	local segments = update({tr = self}, self.segments) --{seg1, ...}
+	local segments = update({tr = self}, self.segments_class) --{seg1, ...}
 
 	if len == 0 then
 		return segments
@@ -501,44 +530,43 @@ function tr:shape(text_tree)
 	return segments
 end
 
-tr.segments = {} --methods for segments
+local segments = {} --methods for segment list
+tr.segments_class = segments
 
-function tr.segments:layout(x, y, w, h, halign, valign)
+function segments:layout(x, y, w, h, halign, valign)
 
 	halign = halign or 'left'
 	valign = valign or 'top'
 	assert(halign == 'left' or halign == 'right' or halign == 'center')
 	assert(valign == 'top' or valign == 'bottom' or valign == 'middle')
 
-	local lines = update({tr = self.tr, segments = self}, self.tr.lines)
+	local lines = update({tr = self.tr, segments = self}, self.tr.lines_class)
 
 	if #self == 0 then
 		return lines
 	end
 
-	--do line wrapping and compute line metrics.
+	--do line wrapping and compute line width and hlsb.
 	zone'linewrap'
 	local line
+	local ax, dx --line x-advance for line width calculation.
 	for i,seg in ipairs(self) do
-		if not line or line.advance_x + seg.run.hlsb + seg.run.w > w then
+		if not line or line.advance_x + dx + seg.run.hlsb + seg.run.w > w then
+			ax = -seg.run.hlsb
+			dx = halign == 'left' and 0 or ax
 			line = {
 				hlsb = seg.run.hlsb,
 				advance_x = 0,
 				w = 0,
-				h = 0,
 				ascent = 0, descent = 0,
 				spacing_ascent = 0, spacing_descent = 0,
 			}
 			push(lines, line)
 		end
-		line.w = line.advance_x + seg.run.hlsb + seg.run.w
+		line.w = ax + seg.run.hlsb + seg.run.w
 		line.advance_x = line.advance_x + seg.run.advance_x
-		line.ascent = math.max(line.ascent, seg.run.ascent)
-		line.descent = math.min(line.descent, seg.run.descent)
-		line.spacing_ascent
-			= math.max(line.spacing_ascent, seg.run.ascent * seg.line_spacing)
-		line.spacing_descent
-			= math.min(line.spacing_descent, seg.run.descent * seg.line_spacing)
+		ax = ax + seg.run.advance_x
+
 		push(line, seg)
 		if seg.linebreak then
 			line = nil
@@ -546,7 +574,7 @@ function tr.segments:layout(x, y, w, h, halign, valign)
 	end
 	zone()
 
-	--reorder RTL segments on each line separately, and concatenate the runs.
+	--reorder RTL segments on each line separately and concatenate the runs.
 	zone'reorder'
 	for _,line in ipairs(lines) do
 		local n = #line
@@ -567,13 +595,24 @@ function tr.segments:layout(x, y, w, h, halign, valign)
 	for i,line in ipairs(lines) do
 
 		--compute line's aligned x position relative to the textbox.
-		line.w = line.w - line.hlsb
 		if halign == 'left' then
 			line.x = 0
 		elseif halign == 'right' then
 			line.x = w - line.w - line.hlsb
 		elseif halign == 'center' then
 			line.x = (w - line.w) / 2 - line.hlsb
+		end
+
+		--compute line's vertical metrics.
+		for _,seg in ipairs(line) do
+			line.ascent = math.max(line.ascent, seg.run.ascent)
+			line.descent = math.min(line.descent, seg.run.descent)
+			local half_line_gap =
+				(seg.run.ascent - seg.run.descent) * (seg.line_spacing - 1) / 2
+			line.spacing_ascent
+				= math.max(line.spacing_ascent, seg.run.ascent + half_line_gap)
+			line.spacing_descent
+				= math.min(line.spacing_descent, seg.run.descent - half_line_gap)
 		end
 
 		--compute line's y position relative to first line's baseline.
@@ -598,16 +637,17 @@ function tr.segments:layout(x, y, w, h, halign, valign)
 	end
 
 	--store textbox's origin.
-	--the textbox can be moved after layouting.
+	--the textbox can be moved after layouting without requiring re-layouting.
 	lines.x = x
 	lines.y = y
 
 	return lines
 end
 
-tr.lines = {} --methods for lines
+local lines = {} --methods for line list
+tr.lines_class = lines
 
-function tr.lines:paint(cr)
+function lines:paint(cr)
 	local rs = self.tr.rs
 
 	for _,line in ipairs(self) do
@@ -620,14 +660,15 @@ function tr.lines:paint(cr)
 			local run = seg.run
 			local hb_buf = run.hb_buf
 
+			local glyph_count = hb_buf:get_length()
 			local glyph_info  = hb_buf:get_glyph_infos()
 			local glyph_pos   = hb_buf:get_glyph_positions()
 
-			for i = run.i1, run.i2 do
+			for i = 0, glyph_count-1 do
 
 				local glyph_index = glyph_info[i].codepoint
 
-				--glyph origin
+				--glyph origin relative to the start of the line.
 				local px = ax + glyph_pos[i].x_offset / 64
 				local py = ay + glyph_pos[i].y_offset / 64
 
@@ -654,7 +695,7 @@ end
 local function cmp_ys(line, y)
 	return line.y - line.spacing_descent < y
 end
-function tr.lines:hit_test_line(x, y,
+function lines:hit_test_line(x, y,
 	extend_top, extend_bottom, extend_left, extend_right
 )
 	x = x - self.x
@@ -666,27 +707,27 @@ function tr.lines:hit_test_line(x, y,
 	else
 		local i = binsearch(y, self, cmp_ys) or #self
 		local line = self[i]
-		return (extend_left or x >= line.x + line.hlsb)
-			and (extend_right or x <= line.x + line.hlsb + line.w)
+		return (extend_left or x >= line.x)
+			and (extend_right or x <= line.x + line.advance_x)
 			and i or nil
 	end
 end
 
-function tr.lines:hit_test(x, y,
+function lines:hit_test(x, y,
 	extend_top, extend_bottom, extend_linegap, extend_left, extend_right
 )
-	local line_i = self:hit_test_line(x, y,
+	local hit_line_i = self:hit_test_line(x, y,
 		extend_top, extend_bottom, extend_linegap, extend_left, extend_right
 	)
-	if not line_i then return nil end
-	local line = self[line_i]
+	if not hit_line_i then return nil end
+	local line = self[hit_line_i]
 
 	local rs = self.tr.rs
 
 	local ax = self.x + line.x
 	local ay = self.y + self.baseline + line.y
 
-	local a0x, a0y = ax, ay
+	local hit_seg_i, hit_glyph_i
 
 	for seg_i, seg in ipairs(line) do
 
@@ -695,36 +736,40 @@ function tr.lines:hit_test(x, y,
 
 		if x >= ax and x <= ax + run.advance_x then
 
-			local glyph_info  = hb_buf:get_glyph_infos()
+			hit_seg_i = seg_i
+
+			local glyph_count = hb_buf:get_length()
 			local glyph_pos   = hb_buf:get_glyph_positions()
 
-			for i = run.i1, run.i2 do
+			local min_d = 1/0
 
-				local glyph_index = glyph_info[i].codepoint
-
-				--glyph origin
-				local px = ax + glyph_pos[i].x_offset / 64
-				local py = ay + glyph_pos[i].y_offset / 64
-
-				--local w = glyph_pos[i].x_advance / 64
-				--local h = run.ascent
-
-				local m = rs:glyph_metrics(run.font, run.font_size, glyph_index)
-
-				if x >= px + m.hlsb and x <= px + m.hlsb + m.w then
-					return line_i, seg,
-						a0x + line.hlsb, a0y - line.ascent, line.w, line.ascent - line.descent,
-						a0x + line.hlsb, a0y - line.spacing_ascent, line.w, line.spacing_ascent - line.spacing_descent,
-						ax + run.hlsb, ay + run.htsb, run.w, run.h,
-						px + m.hlsb, py, m.w, -m.h
+			for i = 0, glyph_count do
+				local px
+				if i < glyph_count then
+					px = ax + glyph_pos[i].x_offset / 64
+				else
+					px = ax + run.advance_x
+				end
+				local d = math.abs(x - px)
+				if d < min_d then
+					min_d = d
+					hit_glyph_i = i
 				end
 			end
 
+			if hit_glyph_i == glyph_count and hit_seg_i < #line then
+				hit_seg_i = hit_seg_i + 1
+				hit_glyph_i = 0
+			end
+
+			break
 		end
 
 		ax = ax + run.advance_x
 		ay = ay + run.advance_y
 	end
+
+	return hit_line_i, hit_seg_i, hit_glyph_i
 
 end
 
