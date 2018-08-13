@@ -27,6 +27,8 @@ local count = glue.count
 local clamp = glue.clamp
 local snap = glue.snap
 local binsearch = glue.binsearch
+local memoize = glue.memoize
+local growbuffer = glue.growbuffer
 local bounding_box = box2d.bounding_box
 local hit_box = box2d.hit
 local odd = function(x) return band(x, 1) == 1 end
@@ -119,28 +121,21 @@ function tr:add_mem_font(...)
 	return override_font(self.rs:add_mem_font(...))
 end
 
---static, auto-growing temp buffers used for shaping.
-
-local len0 = -1
-
-local function realloc(var, ctype, len)
-	if len > len0 then
-		return ffi.new(ctype, len)
-	else
-		return var
-	end
-end
-
-local
-	str, scripts, langs,
-	bidi_types, bracket_types, levels, vstr,
-	linebreaks, graphemebreaks
+local alloc_str = growbuffer'uint32_t[?]'
+local alloc_scripts = growbuffer'hb_script_t[?]'
+local alloc_langs = growbuffer'hb_language_t[?]'
+local alloc_bidi_types = growbuffer'FriBidiCharType[?]'
+local alloc_bracket_types = growbuffer'FriBidiBracketType[?]'
+local alloc_levels = growbuffer'FriBidiLevel[?]'
+local alloc_vstr = growbuffer'FriBidiChar[?]'
+local alloc_linebreaks = growbuffer'char[?]'
+local alloc_grapheme_breaks = growbuffer'char[?]'
 
 local tr_free = tr.free
 function tr:free()
-	str, scripts, langs,
-	bidi_types, bracket_types, levels, vstr,
-	linebreaks, graphemebreaks = nil
+	alloc_str, alloc_scripts, alloc_langs,
+	alloc_bidi_types, alloc_bracket_types, alloc_levels, alloc_vstr,
+	alloc_linebreaks, alloc_grapheme_breaks = nil
 	tr_free(self)
 end
 
@@ -177,6 +172,30 @@ local hb_glyph_size =
 
 local function isnewline(c)
 	return c == 10 or c == 13
+end
+
+--the harfbuzz language is a ISO 639 language code, but libunibreak only
+--needs the 2-char language code part.
+local ub_lang = memoize(function(hb_lang)
+	local s = hb.language_tostring(hb_lang)
+	return s and s:sub(1, 2)
+end)
+local ub_lang = function(hb_lang)
+	return ub_lang(tonumber(hb_lang))
+end
+
+local function get_cluster(glyph_info, i)
+	return glyph_info[i].cluster
+end
+
+local function count_graphemes(grapheme_breaks, start, len)
+	local n = 0
+	for i = start, start+len-1 do
+		if grapheme_breaks[i] == 0 then
+			n = n + 1
+		end
+	end
+	return n
 end
 
 function tr:shape_text_run(
@@ -235,6 +254,78 @@ function tr:shape_text_run(
 		glyph_pos[i].x_offset = px
 		glyph_pos[i].y_offset = py
 	end
+	ax = ax / 64
+	ay = ay / 64
+	zone()
+
+	zone'hb_shape_cursor_pos'
+	local cursor_i = {} --{i1, ...}
+	local cursor_x = {} --{x1, ...}
+	local grapheme_breaks
+
+	local function add_pos(i, glyph_count, cluster, cluster_len, cluster_x)
+		push(cursor_i, cluster)
+		push(cursor_x, cluster_x)
+		if cluster_len > 1 then
+			--last cluster is made of multiple codepoints. check how many
+			--graphemes it contains.
+			if not grapheme_breaks then
+				grapheme_breaks = alloc_grapheme_breaks(len)
+				--NOTE: lang arg not used in current libunibreak implementation.
+				ub.graphemebreaks(str + i, len, nil, grapheme_breaks)
+			end
+			local grapheme_count =
+				count_graphemes(grapheme_breaks, cluster, cluster_len)
+			if grapheme_count > 1 then
+				--the cluster contains more than one grapheme, see if the font
+				--has ligature carets for it.
+				for i = i, i+glyph_count-1 do
+					local glyph_index = glyph_info[i].codepoint
+					local cluster_x = glyph_pos[i].x_offset / 64
+					local carets, caret_count =
+						font.hb_font:get_ligature_carets(hb_dir, glyph_index)
+					if caret_count > 0 then
+						--add the ligature carets from the font.
+						for i = 0, caret_count-1 do
+							local lig_x = carets[i] / 64
+							push(cursor_i, cluster)
+							push(cursor_x, cluster_x + lig_x)
+						end
+					else
+						--font doesn't provide carets: add synthetic carets.
+						local w = (glyph_pos[i].x_advance / 64 / grapheme_count)
+						for i = 1, grapheme_count-1 do
+							local lig_x = i * w
+							print(grapheme_count, lig_x, ax)
+							push(cursor_i, cluster)
+							push(cursor_x, cluster_x + lig_x)
+						end
+					end
+				end
+			end
+		end
+	end
+
+	local cluster_offset = i
+	local last_i, last_glyph_count, last_cluster, last_cluster_x
+	for i, glyph_count, cluster in runs(glyph_info, glyph_count, 0, get_cluster) do
+		local cluster = cluster - cluster_offset
+		local cluster_x = glyph_pos[i].x_offset / 64
+		if i > 0 then
+			local last_cluster_len = cluster - last_cluster
+			add_pos(last_i, last_glyph_count, last_cluster, last_cluster_len, last_cluster_x)
+		end
+		last_i, last_glyph_count, last_cluster, last_cluster_x =
+			i, glyph_count, cluster, cluster_x
+	end
+	if last_cluster then
+		local last_cluster_len = len - last_cluster
+		add_pos(last_i, last_glyph_count, last_cluster, last_cluster_len, last_cluster_x)
+	end
+
+	push(cursor_i, len)
+	push(cursor_x, ax)
+
 	zone()
 
 	local glyph_run = update({
@@ -246,9 +337,9 @@ function tr:shape_text_run(
 		info = glyph_info,
 		pos = glyph_pos,
 		--for positioning in horizontal flow
-		advance_x = ax / 64,
+		advance_x = ax,
 		--for positioning in vertical flow (NYI)
-		advance_y = ay / 64,
+		advance_y = ay,
 		--for vertical alignment, line spacing and line hit-testing
 		ascent = font.ascent,
 		descent = font.descent,
@@ -264,9 +355,12 @@ function tr:shape_text_run(
 			+ 200 --this table
 			+ 4 * len --input text
 			+ hb_glyph_size * glyph_count, --output glyphs
+		--for hit testing
+		cursor_i = cursor_i,
+		cursor_x = cursor_x,
 		--for cluster mapping
 		text_len = len,
-		lang = lang,
+		hb_dir = hb_dir,
 	}, self.glyph_run_class)
 
 	return glyph_run
@@ -365,7 +459,7 @@ function tr:shape(text_tree)
 	local segments = update({tr = self}, self.segments_class) --{seg1, ...}
 
 	--convert and concatenate text into a single utf32 buffer.
-	str = realloc(str, 'uint32_t[?]', len)
+	local str = alloc_str(len)
 	local offset = 0
 	for _,run in ipairs(text_runs) do
 		if run.charset == 'utf8' then
@@ -380,8 +474,8 @@ function tr:shape(text_tree)
 	end
 
 	--detect the script and lang properties for each char of the entire text.
-	scripts = realloc(scripts, 'hb_script_t[?]', len)
-	langs = realloc(langs, 'hb_language_t[?]', len)
+	local scripts = alloc_scripts(len)
+	local langs = alloc_langs(len)
 	zone'detect_script'
 	detect_scripts(str, len, scripts)
 	zone()
@@ -417,10 +511,10 @@ function tr:shape(text_tree)
 		or dir == 'ltr'  and fb.C.FRIBIDI_PAR_LTR
 		or dir == 'auto' and fb.C.FRIBIDI_PAR_ON
 
-	bidi_types    = realloc(bidi_types, 'FriBidiCharType[?]', len)
-	bracket_types = realloc(bracket_types, 'FriBidiBracketType[?]', len)
-	levels        = realloc(levels, 'FriBidiLevel[?]', len)
-	vstr          = realloc(vstr, 'FriBidiChar[?]', len)
+	local bidi_types    = alloc_bidi_types(len)
+	local bracket_types = alloc_bracket_types(len)
+	local levels        = alloc_levels(len)
+	local vstr          = alloc_vstr(len)
 
 	fb.bidi_types(str, len, bidi_types)
 	fb.bracket_types(str, len, bidi_types, bracket_types)
@@ -431,11 +525,9 @@ function tr:shape(text_tree)
 
 	--run Unicode line breaking over each run of text with same language.
 	zone'linebreak'
-	linebreaks = realloc(linebreaks, 'char[?]', len)
+	local linebreaks = alloc_linebreaks(len)
 	for i, len, lang in runs(langs, len, 0) do
-		local lang = hb.language_tostring(lang)
-		lang = lang and lang:sub(1, 2)
-		ub.linebreaks(vstr + i, len, lang, linebreaks + i)
+		ub.linebreaks(vstr + i, len, ub_lang(lang), linebreaks + i)
 	end
 	zone()
 
@@ -516,7 +608,6 @@ function tr:shape(text_tree)
 	end
 	zone()
 
-	len0 = len
 	return segments
 end
 
@@ -730,7 +821,7 @@ function lines:hit_test(x, y,
 	local ax = self.x + line.x
 	local ay = self.y + self.baseline + line.y
 
-	local hit_seg_i, hit_glyph_i, hit_text_run, hit_text_i
+	local hit_seg_i, hit_cursor_i, hit_text_run, hit_text_i
 
 	for seg_i, seg in ipairs(line) do
 		local run = seg.glyph_run
@@ -741,44 +832,24 @@ function lines:hit_test(x, y,
 
 			local min_d = 1/0
 
-			--find cursor position (i.e. x-advance) closest to x
-			for glyph_i = 0, run.len do
-				local px
-				if glyph_i < run.len then
-					px = ax + run:glyph_pos(glyph_i)
-				else
-					px = ax + run.advance_x
-				end
+			--find the cursor position closest to x.
+			for i,cx in ipairs(run.cursor_x) do
+				local px = ax + cx
 				local d = math.abs(x - px)
 				if d < min_d then
 					min_d = d
-					hit_glyph_i = glyph_i
+					hit_cursor_i = i
 				end
 			end
 
-			--if the last position was hit, hit the position 0 of the next
+			--if the last position was hit, hit the first position of the next
 			--segment (if on the same line) automatically, just so that
 			--we don't have to deal with two equivalent positions from here on.
-			if hit_glyph_i == run.len and hit_seg_i < #line then
+			if hit_cursor_i == #run.cursor_x and hit_seg_i < #line then
 				hit_seg_i = hit_seg_i + 1
-				hit_glyph_i = 0
+				hit_cursor_i = 1
 				seg = line[hit_seg_i]
 				run = seg.glyph_run
-			end
-
-			--find the part of the visual string corresponding to the hit cluster.
-			local cluster, cluster_len
-			if hit_glyph_i < run.len then
-				hit_glyph_i, cluster, cluster_len = hit_cluster(hit_glyph_i, run)
-			else
-				cluster, cluster_len = run.text_len, 0
-			end
-			hit_text_i  = seg.text_run_offset + cluster
-			hit_text_run = seg.text_run
-
-			if cluster_len > 1 then
-				--graphemebreaks = realloc(graphemebreaks, 'char[?]', cluster_len)
-				--ub.graphemebreaks(hit_text_run.str + hit_text_i, cluster_len, run.lang, cluster_len)
 			end
 
 			break
@@ -788,7 +859,7 @@ function lines:hit_test(x, y,
 		ay = ay + run.advance_y
 	end
 
-	return hit_line_i, hit_seg_i, hit_glyph_i, hit_text_run, hit_text_i
+	return hit_line_i, hit_seg_i, hit_cursor_i, hit_text_run, hit_text_i
 
 end
 

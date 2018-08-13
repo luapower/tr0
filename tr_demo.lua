@@ -116,6 +116,7 @@ function win:repaint()
 			line_spacing = 1.5,
 			--dir = 'rtl',
 			--{'A'},
+			font_name = 'amiri,120',
 			{
 				line_spacing = 1.2,
 				font_name = 'amiri,120',
@@ -130,7 +131,9 @@ function win:repaint()
 				--'BDgt \u{65}\u{301}ffi fi D\r\nTd  VA Dg'
 			},
 			--{font_name = 'amiri,200', 'خمسة المفاتيح ABC\n'},
-			{font_name = 'eb garamond, 200', 'fa AVy ffi fl lg MM f\nDEF EF F D glm\n'},
+			{
+			font_name = 'eb garamond, 100',
+			'fa AVy ffix xfl lg MM f\nDEF EF F D glm\n'},
 			--{font_name = 'NotoColorEmoji,34', ('\xF0\x9F\x98\x81'):rep(3)},
 		}
 		self.lines = self.segs:layout(x, y, w, h, 'center', 'middle')
@@ -146,35 +149,27 @@ function win:repaint()
 			rect(cr, hit and '#f22' or '#022', x + line.hlsb, y, line.w, -line.spacing_descent)
 			rect(cr, hit and '#fff' or '#888', x + line.hlsb, y, line.w, -line.ascent)
 			rect(cr, hit and '#0ff' or '#088', x + line.hlsb, y, line.w, -line.descent)
-			dot(cr, '#ff0', x + line.advance_x, y, 10)
+			dot(cr, '#fff', x, y, 8)
+			dot(cr, '#ff0', x + line.advance_x, y, 8)
 			local ax = x
 			local ay = y
 			for i,seg in ipairs(line) do
 				local run = seg.glyph_run
 				local hit = hit and self.hit_seg_i == i
 				rect(cr, hit and '#f00' or '#555', ax + run.hlsb, ay + run.htsb, run.w, run.h)
-				dot(cr, '#f0f', ax, ay, 6)
-				dot(cr, '#f0f', ax + run.advance_x, ay, 6)
-				for i = 0, run.len-1 do
-					local px, py = run:glyph_pos(i)
-					local hit = hit and self.hit_glyph_i == i
-					local m = run:glyph_metrics(i)
-					dot(cr, '#0ff', ax + px, ay + py, 3)
+				dot(cr, '#f0f', ax, ay, 4)
+				dot(cr, '#0f0', ax + run.advance_x, ay, 6)
+				for i,cx in ipairs(run.cursor_x) do
+					local px = ax + cx
+					local hit = hit and self.hit_cursor_i == i
+					dot(cr, '#0ff', px, ay, 3)
 					if hit then
-						rect(cr, '#fff', ax + px - 1, ay, 2, -line.ascent)
+						rect(cr, '#fff', px, ay, 2, -line.ascent)
 					end
-				end
-				local hit = hit and self.hit_glyph_i == run.len
-				if hit then
-					rect(cr, '#fff', ax + run.advance_x - 1, ay, 2, -line.ascent)
 				end
 				ax = ax + run.advance_x
 			end
 		end
-
-		--graphemebreaks = realloc(graphemebreaks, 'char[?]', len)
-		--ub.graphemebreaks(vstr + i, len, lang, graphemebreaks + i)
-
 	end
 
 	--local s = (time.clock() - t0)
@@ -190,7 +185,7 @@ function win:mousemove(mx, my)
 	if not self.lines then return end
 	self.hit_line_i,
 	self.hit_seg_i,
-	self.hit_glyph_i,
+	self.hit_cursor_i,
 	self.hit_text_run,
 	self.hit_text_i =
 		self.lines:hit_test(mx, my)
