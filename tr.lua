@@ -174,8 +174,8 @@ local function isnewline(c)
 	return c == 10 or c == 13
 end
 
---the harfbuzz language is a ISO 639 language code, but libunibreak only
---needs the 2-char language code part.
+--for harfbuzz, language must be a ISO 639 language code, but libunibreak
+--only uses the 2-char language code part.
 local ub_lang = memoize(function(hb_lang)
 	local s = hb.language_tostring(hb_lang)
 	return s and s:sub(1, 2)
@@ -198,8 +198,16 @@ local function count_graphemes(grapheme_breaks, start, len)
 	return n
 end
 
+local function next_grapheme(grapheme_breaks, i, len)
+	while grapheme_breaks[i] ~= 0 do
+		i = i + 1
+	end
+	i = i + 1
+	return i < len and i or nil
+end
+
 function tr:shape_text_run(
-	str, str_len, i, len,
+	str, str_len, str_offset, len,
 	font, font_size, features, feat_count, rtl, script, lang
 )
 	font:ref()
@@ -214,13 +222,13 @@ function tr:shape_text_run(
 	hb_buf:set_language(lang)
 
 	--ignore trailing line breaks, if any
-	for i = i+len-1, i, -1 do
+	for i = str_offset+len-1, str_offset, -1 do
 		if isnewline(str[i]) then
 			len = len - 1
 		end
 	end
 
-	hb_buf:add_codepoints(str, str_len, i, len)
+	hb_buf:add_codepoints(str, str_len, str_offset, len)
 
 	zone'hb_shape_full'
 	hb_buf:shape_full(font.hb_font, features, feat_count)
@@ -263,53 +271,74 @@ function tr:shape_text_run(
 	local cursor_x = {} --{x1, ...}
 	local grapheme_breaks
 
-	local function add_pos(i, glyph_count, cluster, cluster_len, cluster_x)
+	local function add_pos(glyph_offset, glyph_count, cluster, cluster_len, cluster_x)
 		push(cursor_i, cluster)
 		push(cursor_x, cluster_x)
 		if cluster_len > 1 then
-			--last cluster is made of multiple codepoints. check how many
-			--graphemes it contains.
+			--the cluster is made of multiple codepoints. check how many
+			--graphemes it contains since we need to add additional cursor
+			--positions at each grapheme boundary.
 			if not grapheme_breaks then
 				grapheme_breaks = alloc_grapheme_breaks(len)
-				--NOTE: lang arg not used in current libunibreak implementation.
-				ub.graphemebreaks(str + i, len, nil, grapheme_breaks)
+				local lang = nil --not used in current libunibreak impl.
+				ub.graphemebreaks(str + str_offset, len, lang, grapheme_breaks)
 			end
 			local grapheme_count =
 				count_graphemes(grapheme_breaks, cluster, cluster_len)
 			if grapheme_count > 1 then
-				--the cluster contains more than one grapheme, see if the font
-				--has ligature carets for it.
-				for i = i, i+glyph_count-1 do
+				--the cluster is made of multiple graphemes which can be the
+				--result of forming ligatures which the font can provide carets
+				--for. if the font gives no ligature carets, we divide the
+				--last glyph's x-advance evenly between graphemes.
+				for i = glyph_offset, glyph_offset + glyph_count - 1 do
 					local glyph_index = glyph_info[i].codepoint
 					local cluster_x = glyph_pos[i].x_offset / 64
 					local carets, caret_count =
 						font.hb_font:get_ligature_carets(hb_dir, glyph_index)
 					if caret_count > 0 then
+						-- there shouldn't be more carets than are graphemes - 1.
+						caret_count = math.min(caret_count, grapheme_count - 1)
 						--add the ligature carets from the font.
 						for i = 0, caret_count-1 do
+							--create a synthetic cluster at each grapheme boundary.
+							cluster = next_grapheme(grapheme_breaks, cluster, len)
 							local lig_x = carets[i] / 64
 							push(cursor_i, cluster)
 							push(cursor_x, cluster_x + lig_x)
 						end
+						--infer the number of graphemes in the glyph as being
+						--the number of ligature carets in the glyph + 1.
+						grapheme_count = grapheme_count - (caret_count + 1)
 					else
-						--font doesn't provide carets: add synthetic carets.
-						local w = (glyph_pos[i].x_advance / 64 / grapheme_count)
+						--font doesn't provide carets: add synthetic carets by
+						--dividing the total x-advance of the remaining glyphs
+						--evenly between remaining graphemes.
+						local last_glyph_index = glyph_offset + glyph_count - 1
+						local total_advance_x =
+							 (glyph_pos[last_glyph_index].x_offset
+							+ glyph_pos[last_glyph_index].x_advance
+							- glyph_pos[i].x_offset) / 64
+						local w = total_advance_x / grapheme_count
 						for i = 1, grapheme_count-1 do
+							--create a synthetic cluster at each grapheme boundary.
+							cluster = next_grapheme(grapheme_breaks, cluster, len)
 							local lig_x = i * w
-							print(grapheme_count, lig_x, ax)
 							push(cursor_i, cluster)
 							push(cursor_x, cluster_x + lig_x)
 						end
+						grapheme_count = 0
+					end
+					if grapheme_count == 0 then
+						break --all graphemes have carets
 					end
 				end
 			end
 		end
 	end
 
-	local cluster_offset = i
 	local last_i, last_glyph_count, last_cluster, last_cluster_x
 	for i, glyph_count, cluster in runs(glyph_info, glyph_count, 0, get_cluster) do
-		local cluster = cluster - cluster_offset
+		local cluster = cluster - str_offset
 		local cluster_x = glyph_pos[i].x_offset / 64
 		if i > 0 then
 			local last_cluster_len = cluster - last_cluster
@@ -358,9 +387,6 @@ function tr:shape_text_run(
 		--for hit testing
 		cursor_i = cursor_i,
 		cursor_x = cursor_x,
-		--for cluster mapping
-		text_len = len,
-		hb_dir = hb_dir,
 	}, self.glyph_run_class)
 
 	return glyph_run
@@ -597,7 +623,7 @@ function tr:shape(text_tree)
 			level = level,
 			linebreak = linebreak == 0, --hard break
 			line_spacing = text_run.line_spacing,
-			--for cluster mapping
+			--for cursor positioning
 			text_run = text_run,
 			text_run_offset = offset - text_run.offset,
 		})
@@ -851,6 +877,9 @@ function lines:hit_test(x, y,
 				seg = line[hit_seg_i]
 				run = seg.glyph_run
 			end
+
+			hit_text_run = seg.text_run
+			hit_text_i = seg.text_run_offset + run.cursor_i[hit_cursor_i]
 
 			break
 		end

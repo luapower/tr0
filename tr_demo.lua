@@ -132,8 +132,14 @@ function win:repaint()
 			},
 			--{font_name = 'amiri,200', 'خمسة المفاتيح ABC\n'},
 			{
-			font_name = 'eb garamond, 100',
-			'fa AVy ffix xfl lg MM f\nDEF EF F D glm\n'},
+				--{font_name = 'eb garamond, 100',
+				--'fa AVy ffix xfl lg MM f\n',
+				--{'DEF EF F D glm\n'},
+			},
+
+			{font_name = 'eb garamond, 100', 'ffix xfl ffi fl\n'},
+			{font_name = 'amiri, 100', 'ffix xfl ffi fl'},
+
 			--{font_name = 'NotoColorEmoji,34', ('\xF0\x9F\x98\x81'):rep(3)},
 		}
 		self.lines = self.segs:layout(x, y, w, h, 'center', 'middle')
@@ -189,6 +195,7 @@ function win:mousemove(mx, my)
 	self.hit_text_run,
 	self.hit_text_i =
 		self.lines:hit_test(mx, my)
+	print(self.hit_text_run, self.hit_text_i)
 	self:invalidate()
 end
 
