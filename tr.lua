@@ -450,8 +450,10 @@ end
 
 --convert a tree of nested text runs into a flat list of runs with properties
 --dynamically inherited from the parent nodes.
+--one text run is always created, even when there's no text.
 local function flatten_text_tree(parent, runs)
-	for _,run_or_text in ipairs(parent) do
+	for i = 1, math.max(1, #parent) do
+		local run_or_text = parent[i] or ''
 		local run
 		if type(run_or_text) == 'string' then
 			run = {text = run_or_text}
@@ -663,7 +665,7 @@ function tr:shape(text_tree)
 			--non-reusable part
 			bidi_level = level, --for bidi reordering
 			linebreak = linebreak == 0, --hard break; for layouting
-			line_spacing = text_run.line_spacing, --for layouting
+			line_spacing = text_run.line_spacing or 1, --for layouting
 			--for cursor positioning
 			text_run = text_run,
 			offset = offset,
@@ -805,8 +807,11 @@ end
 local lines = {} --methods for line list
 tr.lines_class = lines
 
+tr.default_color = '#fff'
+
 function lines:paint(cr)
 	local rs = self.tr.rs
+	local default_color = self.tr.default_color
 	for _,line in ipairs(self) do
 
 		local ax = self.x + line.x
@@ -814,6 +819,7 @@ function lines:paint(cr)
 
 		for _,seg in ipairs(line) do
 			local run = seg.glyph_run
+			rs:setcolor(cr, seg.text_run.color or default_color)
 
 			for i = 0, run.len-1 do
 
@@ -859,42 +865,22 @@ end
 
 --move `delta` cursor positions from a certain cursor position.
 function segments:next_cursor(seg, cursor_i, delta)
-	delta = math.floor(delta) --prevent infinite loop
-	if delta ~= 0 then
-		local step = delta > 0 and 1 or -1
-		while delta ~= 0 do
-			local i = cursor_i + step
-			if (step < 0 and i < 1) or i > #seg.glyph_run.cursor_offsets then
-				local next_seg = self[seg.index + step]
-				if not next_seg then
-					break
-				end
-				seg = next_seg
-				i = step > 0 and 1 or #seg.glyph_run.cursor_offsets
+	delta = math.floor(delta or 0) --prevent infinite loop
+	local step = delta > 0 and 1 or -1
+	while delta ~= 0 do
+		local i = cursor_i + step
+		if (step < 0 and i < 1) or i > #seg.glyph_run.cursor_offsets then
+			local next_seg = self[seg.index + step]
+			if not next_seg then
+				break
 			end
-			cursor_i = i
-			delta = delta - step
+			seg = next_seg
+			i = step > 0 and 1 or #seg.glyph_run.cursor_offsets
 		end
+		cursor_i = i
+		delta = delta - step
 	end
 	return seg, cursor_i, delta
-end
-
---move `delta` cursor positions into the logical text.
-function segments:next_text_offset(text_offset, delta)
-	local step = delta > 0 and 1 or -1
-	local seg, cursor_i = self:cursor_at_text_offset(text_offset)
-	while true do
-		seg, cursor_i, delta = self:next_cursor(seg, cursor_i, delta)
-		if delta ~= 0 then
-			break --partial advance
-		elseif self:text_offset_at_cursor(seg, cursor_i) == text_offset then
-			break
-			--delta = step --same offset, go further
-		else
-			break --diff. offset
-		end
-	end
-	return self:text_offset_at_cursor(seg, cursor_i), seg, cursor_i, delta
 end
 
 local function cmp_ys(line, y)
@@ -918,13 +904,15 @@ function lines:hit_test_lines(x, y,
 	end
 end
 
-function lines:hit_test_cursors(line, x, y)
+function lines:hit_test_cursors(line_i, x, extend_left, extend_right)
+	local line = self[line_i]
 	local ax = self.x + line.x
-	local ay = self.y + self.baseline + line.y
-	for _,seg in ipairs(line) do
+	for seg_i, seg in ipairs(line) do
 		local run = seg.glyph_run
 		local x = x - ax
-		if x >= 0 and x <= run.advance_x then --hit inside segment
+		if ((extend_left and seg_i == 1) or x >= 0)
+			and ((extend_right and seg_i == #line) or x <= run.advance_x)
+		then
 			--find the cursor position closest to x.
 			local xs = run.cursor_xs
 			local min_d, cursor_i = 1/0
@@ -937,18 +925,17 @@ function lines:hit_test_cursors(line, x, y)
 			return seg, cursor_i
 		end
 		ax = ax + run.advance_x
-		ay = ay + run.advance_y
 	end
 end
 
-function lines:hit_test(x, y, ...)
-	local line_i = self:hit_test_lines(x, y, ...)
+function lines:hit_test(x, y,
+	extend_top, extend_bottom, extend_left, extend_right
+)
+	local line_i = self:hit_test_lines(x, y,
+		extend_top, extend_bottom, extend_left, extend_right
+	)
 	if not line_i then return nil end
-	return line_i, self:hit_test_cursors(self[line_i], x, y)
-end
-
-function lines:cursor_at_text_offset(text_offset)
-	return self.segments:cursor_at_text_offset(text_offset)
+	return line_i, self:hit_test_cursors(line_i, x, extend_left, extend_right)
 end
 
 function lines:text_offset_at_cursor(seg, cursor_i)
@@ -974,18 +961,19 @@ function lines:cursor_pos(seg, cursor_i)
 	end
 end
 
---cursor objects -------------------------------------------------------------
+--cursor object --------------------------------------------------------------
 
 local cursor = {}
 setmetatable(cursor, cursor)
 tr.cursor_class = cursor
 
 function segments:cursor(text_offset)
-	return update({
+	self = update({
 		tr = self.tr,
 		segments = self,
-		text_offset = text_offset or 0,
 	}, self.tr.cursor_class)
+	self:set_text_offset(text_offset or 0)
+	return self
 end
 
 function cursor:setlines(lines)
@@ -993,20 +981,21 @@ function cursor:setlines(lines)
 	self.lines = lines
 end
 
+function cursor:set_text_offset(text_offset)
+	self.seg, self.cursor_i = self.segments:cursor_at_text_offset(text_offset)
+	self.text_offset = self.segments:text_offset_at_cursor(self.seg, self.cursor_i)
+end
+
 --text position -> layout position.
 function cursor:pos()
-	if not self.seg then
-		self.seg, self.cursor_i =
-			self.lines:cursor_at_text_offset(self.text_offset)
-	end
 	return self.lines:cursor_pos(self.seg, self.cursor_i)
 end
 
 --layout position -> text position.
 function cursor:hit_test(x, y, ...)
 	local line_i, seg, cursor_i = self.lines:hit_test(x, y, ...)
-	if not line_i then return nil end
-	return self.lines:text_offset_at_cursor(seg, cursor_i), seg, cursor_i
+	if not cursor_i then return nil end
+	return self.lines:text_offset_at_cursor(seg, cursor_i), seg, cursor_i, line_i
 end
 
 --move based on a layout position.
@@ -1017,35 +1006,69 @@ function cursor:move_to(x, y, ...)
 	end
 end
 
-function cursor:move_pos(dir, delta, text_offset)
-	text_offset = text_offset or self.text_offset
-	if dir == 'prev' or dir == 'next' then
-		local step = dir == 'next' and 1 or -1
-		local delta = (delta or 1) * step
-		local seg, cursor_i = self.seg, self.cursor_i
-		::again::
-		seg, cursor_i, delta = self.segments:next_cursor(seg, cursor_i, delta)
-		if delta == 0
-			and self.segments:text_offset_at_cursor(seg, cursor_i) == text_offset
-			and self.lines:cursor_pos(seg, cursor_i) == self:pos()
-		then
-			--duplicate cursor (same text position and screen position):
-			--advance further until a different one is found.
-			delta = step
-			goto again
-		end
-		local text_offset = self.segments:text_offset_at_cursor(seg, cursor_i)
-		return text_offset, seg, cursor_i, delta
-	--elseif dir == 'up' or dir == 'down' then
+function cursor:next_cursor(delta)
+	local text_offset, seg, cursor_i = self.text_offset, self.seg, self.cursor_i
+	local step = (delta or 1) > 0 and 1 or -1
+	::again::
+	seg, cursor_i, delta = self.segments:next_cursor(seg, cursor_i, delta)
+	if delta == 0
+		and self.segments:text_offset_at_cursor(seg, cursor_i) == text_offset
+		and self.lines:cursor_pos(seg, cursor_i) == self:pos()
+	then
+		--duplicate cursor (same text position and same screen position):
+		--advance further until a different one is found.
+		delta = step
+		goto again
+	end
+	text_offset = self.segments:text_offset_at_cursor(seg, cursor_i)
+	return text_offset, seg, cursor_i, delta
+end
 
+function cursor:next_line(delta)
+	local text_offset, seg, cursor_i = self.text_offset, self.seg, self.cursor_i
+	local x = self.x or self:pos()
+	local wanted_line_i = self.lines.segmap[seg] + delta
+	local line_i = clamp(wanted_line_i, 1, #self.lines)
+	local delta = wanted_line_i - line_i
+	local line = self.lines[line_i]
+	local seg1, cursor_i1 = self.lines:hit_test_cursors(line_i, x, true, true)
+	if seg1 then
+		seg, cursor_i = seg1, cursor_i1
+		text_offset = self.segments:text_offset_at_cursor(seg, cursor_i)
+		delta = 0
+	end
+	return text_offset, seg, cursor_i, x, delta
+end
+
+function cursor:move(dir, delta)
+	if dir == 'horiz' then
+		self.text_offset, self.seg, self.cursor_i = self:next_cursor(delta)
+		self.x = false
+	elseif dir == 'vert' then
+		self.text_offset, self.seg, self.cursor_i, self.x = self:next_line(delta)
 	else
 		assert(false, 'invalid direction %s', dir)
 	end
 end
 
-function cursor:move(dir, delta, text_offset)
-	self.text_offset, self.seg, self.cursor_i =
-		self:move_pos(dir, delta, text_offset)
+--selection object -----------------------------------------------------------
+
+local selection = {}
+setmetatable(selection, selection)
+tr.selection_class = selection
+
+function segments:selection(text_offset1, text_offset2)
+	self = update({
+		tr = self.tr,
+		segments = self,
+		cursor1 = self:cursor(text_offset1),
+		cursor2 = self:cursor(text_offset2),
+	}, self.tr.selection_class)
+	return self
+end
+
+function selection:interval_pos()
+
 end
 
 return tr

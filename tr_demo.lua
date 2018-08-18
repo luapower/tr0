@@ -128,14 +128,14 @@ function win:repaint()
 		local x, y, w, h = box2d.offset(-50, 0, 0, win:client_size())
 		rect(cr, '#888', x, y, w, h)
 
-		segs = segs or tr:shape{
+		segs = segs or tr:shape
+		{
 			line_spacing = 1.5,
 			--dir = 'rtl',
 			--{'A'},
-			font_name = 'amiri,120',
+			font_name = 'amiri,100',
 			{
 				line_spacing = 1.2,
-				font_name = 'amiri,120',
 
 				--font_name = 'eb garamond, 200',
 				--font_name = 'open sans, 200',
@@ -147,9 +147,9 @@ function win:repaint()
 				--'BDgt \u{65}\u{301}ffi fi D\r\nTd  VA Dg'
 			},
 
-			{font_name = 'amiri,100', 'المفاتيح\n'},
-			{font_name = 'amiri,100', 'المفاتيح ABC\n'},
-			{font_name = 'amiri,100', 'ABC المفاتيح'},
+			{'المفاتيح\n'},
+			{color = '#ff0', 'المفاتيح ABC\n'},
+			{color = '#f6f', 'ABC المفاتيح'},
 
 			{
 				--{font_name = 'eb garamond, 100',
@@ -179,9 +179,6 @@ function win:repaint()
 			dot(cr, '#ff0', x + line.advance_x, y, 8)
 			local ax = x
 			local ay = y
-			if self.hit_seg then
-				--pp(self.hit_seg and self.hit_seg.index, self.hit_cursor_i)--, self.hit_seg.glyph_run.cursor_offsets)
-			end
 			for i,seg in ipairs(line) do
 				local run = seg.glyph_run
 				local hit = hit and self.hit_seg == seg
@@ -205,7 +202,7 @@ function win:repaint()
 			end
 		end
 
-		if self.hit_line_i then
+		if self.hit_cursor_i then
 			local x, y, h = lines:cursor_pos(self.hit_seg, self.hit_cursor_i)
 			--rect(cr, '#f00', x-3, y, 6, h)
 		end
@@ -257,10 +254,16 @@ function win:keypress(key)
 	end
 
 	if key == 'right' then
-		cursor:move'next'
+		cursor:move('horiz', 1)
 		self:invalidate()
 	elseif key == 'left' then
-		cursor:move'prev'
+		cursor:move('horiz', -1)
+		self:invalidate()
+	elseif key == 'up' then
+		cursor:move('vert', -1)
+		self:invalidate()
+	elseif key == 'down' then
+		cursor:move('vert', 1)
 		self:invalidate()
 	end
 end
