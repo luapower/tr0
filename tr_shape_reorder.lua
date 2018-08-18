@@ -9,13 +9,13 @@
 // Data structures used:
 
 struct run_t {
-  int level;
+  int bidi_level;
   // len, glyphs, text, ...
   struct run_t *next;
 };
 
 struct range_t {
-	int level;
+	int bidi_level;
 	// Left-most and right-most runs in the range, in visual order.
 	// Following left's next member eventually gets us to right.
 	// The right run's next member is undefined.
@@ -37,10 +37,10 @@ local alloc_range, free_range = glue.freelist()
 local function merge_range_with_previous(range)
 	local previous = range.previous
 	assert(previous)
-	assert(previous.level < range.level)
+	assert(previous.bidi_level < range.bidi_level)
 
 	local left, right
-	if odd(previous.level) then
+	if odd(previous.bidi_level) then
 		-- Odd, previous goes to the right of range.
 		left = range
 		right = previous
@@ -78,15 +78,15 @@ function reorder_runs(run)
 	while run do
 		local next_run = run.next
 
-		while range and range.level > run.level
-			and range.previous and range.previous.level >= run.level
+		while range and range.bidi_level > run.bidi_level
+			and range.previous and range.previous.bidi_level >= run.bidi_level
 		do
 			range = merge_range_with_previous (range)
 		end
 
-		if range and range.level >= run.level then
+		if range and range.bidi_level >= run.bidi_level then
 			-- Attach run to the range.
-			if odd(run.level) then
+			if odd(run.bidi_level) then
 				-- Odd, range goes to the right of run.
 				run.next = range.left
 				range.left = run
@@ -95,13 +95,13 @@ function reorder_runs(run)
 				range.right.next = run
 				range.right = run
 			end
-			range.level = run.level
+			range.bidi_level = run.bidi_level
 		else
 			-- Allocate new range for run and push into stack.
 			local r = alloc_range()
 			r.left = run
 			r.right = run
-			r.level = run.level
+			r.bidi_level = run.bidi_level
 			r.previous = range
 			range = r
 		end

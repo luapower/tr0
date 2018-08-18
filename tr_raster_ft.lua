@@ -148,7 +148,6 @@ function font:setsize(size)
 	self.scale = scale
 	local ft_scale = scale / 64
 	local m = self.ft_face.size.metrics
-	self.height = m.height * ft_scale
 	self.ascent = m.ascender * ft_scale
 	self.descent = m.descender * ft_scale
 	self:size_changed()

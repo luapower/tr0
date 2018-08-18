@@ -85,6 +85,8 @@ end
 
 local text = require'glue'.readfile('winapi_history.md')
 
+local segs, lines, cursor
+
 function win:repaint()
 	self:title(string.format('%d fps', fps()))
 
@@ -112,7 +114,7 @@ function win:repaint()
 		local x, y, w, h = box2d.offset(-50, 0, 0, win:client_size())
 		rect(cr, '#888', x, y, w, h)
 
-		self.segs = self.segs or tr:shape{
+		segs = segs or tr:shape{
 			line_spacing = 1.5,
 			--dir = 'rtl',
 			--{'A'},
@@ -130,25 +132,34 @@ function win:repaint()
 				--{'\x15\x09\0\0\x4D\x09\0\0\x15\x09\0\0\x3F\x09\0\0\x15\x09\0\0', charset = 'utf32'},
 				--'BDgt \u{65}\u{301}ffi fi D\r\nTd  VA Dg'
 			},
-			--{font_name = 'amiri,200', 'خمسة المفاتيح ABC\n'},
+
+			{font_name = 'amiri,100', 'المفاتيح\n'},
+			{font_name = 'amiri,100', 'المفاتيح ABC\n'},
+			{font_name = 'amiri,100', 'ABC المفاتيح'},
+
 			{
 				--{font_name = 'eb garamond, 100',
 				--'fa AVy ffix xfl lg MM f\n',
 				--{'DEF EF F D glm\n'},
 			},
 
-			{font_name = 'eb garamond, 100', 'ffix xfl ffi fl\n'},
-			{font_name = 'amiri, 100', 'ffix xfl ffi fl'},
+			--{font_name = 'eb garamond, 100', 'ffix xfl ffi fl\n'},
+			--{font_name = 'amiri, 100', 'ffix xfl ffi fl'},
 
 			--{font_name = 'NotoColorEmoji,34', ('\xF0\x9F\x98\x81'):rep(3)},
 		}
-		self.lines = self.segs:layout(x, y, w, h, 'center', 'middle')
-		self.lines:paint(cr)
+		lines = lines or segs:layout(x, y, w, h, 'center', 'middle')
+		lines:paint(cr)
 
-		local x = self.lines.x
-		local y = self.lines.y + self.lines.baseline
-		for i,line in ipairs(self.lines) do
-			local hit = self.hit_line_i == i
+		cursor = cursor or segs:cursor()
+		cursor:set_lines(lines)
+
+		local cx, cy = cursor:pos(cursor.text_offset)
+
+		local x = lines.x
+		local y = lines.y + lines.baseline
+		for i,line in ipairs(lines) do
+			local hit = cursor.line_i == i
 			local x = x + line.x
 			local y = y + line.y
 			rect(cr, hit and '#f22' or '#222', x + line.hlsb, y, line.w, -line.spacing_ascent)
@@ -161,21 +172,24 @@ function win:repaint()
 			local ay = y
 			for i,seg in ipairs(line) do
 				local run = seg.glyph_run
-				local hit = hit and self.hit_seg_i == i
+				local hit = hit and cursor.seg_i == i
 				rect(cr, hit and '#f00' or '#555', ax + run.hlsb, ay + run.htsb, run.w, run.h)
 				dot(cr, '#f0f', ax, ay, 4)
 				dot(cr, '#0f0', ax + run.advance_x, ay, 6)
-				for i,cx in ipairs(run.cursor_x) do
+				for i,cx in ipairs(run.cursor_xs) do
 					local px = ax + cx
-					local hit = hit and self.hit_cursor_i == i
+					local hit = hit and cursor.cursor_i == i
 					dot(cr, '#0ff', px, ay, 3)
-					if hit then
-						rect(cr, '#fff', px, ay, 2, -line.ascent)
-					end
 				end
 				ax = ax + run.advance_x
 			end
 		end
+
+		local x, y, h = cursor:pos()
+		rect(cr, '#fff', x, y, 2, h)
+
+		rect(cr, '#f00', cx, cy, 2, h)
+
 	end
 
 	--local s = (time.clock() - t0)
@@ -188,16 +202,29 @@ function win:repaint()
 end
 
 function win:mousemove(mx, my)
-	if not self.lines then return end
-	self.hit_line_i,
-	self.hit_seg_i,
-	self.hit_cursor_i,
-	self.hit_text_run,
-	self.hit_text_i =
-		self.lines:hit_test(mx, my)
-	print(self.hit_text_run, self.hit_text_i)
+	if not cursor then return end
+	cursor:move_to_pos(mx, my)
 	self:invalidate()
 end
+
+function win:keydown(key)
+
+	if key == 'enter' then
+		require'inspect'({tr, lines}, {
+			process = function(v)
+				if v == '_next' or v == '_prev' then return end
+				return v
+			end,
+		})
+	end
+
+	if key == 'right' then
+			--if self.hit_text_run
+	elseif key == 'left' then
+
+	end
+end
+
 
 nw:app():run()
 
