@@ -67,7 +67,20 @@ font'media/fonts/amiri-regular.ttf'
 local function rect(cr, col, x, y, w, h)
 	local r, g, b, a = color.parse(col, 'rgb')
 	cr:save()
+	cr:new_path()
 	cr:rectangle(x, y, w, h)
+	cr:line_width(1)
+	cr:rgba(r, g, b, a or 1)
+	cr:stroke()
+	cr:restore()
+end
+
+local function arrow(cr, col, x, y, x2, y2)
+	local r, g, b, a = color.parse(col, 'rgb')
+	cr:save()
+	cr:new_path()
+	cr:move_to(x, y)
+	cr:line_to(x2, y2)
 	cr:line_width(1)
 	cr:rgba(r, g, b, a or 1)
 	cr:stroke()
@@ -77,6 +90,7 @@ end
 local function dot(cr, col, x, y, size)
 	local r, g, b, a = color.parse(col, 'rgb')
 	cr:save()
+	cr:new_path()
 	cr:circle(x, y, size or 5)
 	cr:rgba(r, g, b, a or 1)
 	cr:fill()
@@ -151,15 +165,10 @@ function win:repaint()
 		lines = lines or segs:layout(x, y, w, h, 'center', 'middle')
 		lines:paint(cr)
 
-		cursor = cursor or segs:cursor()
-		cursor:set_lines(lines)
-
-		local cx, cy = cursor:pos(cursor.text_offset)
-
 		local x = lines.x
 		local y = lines.y + lines.baseline
 		for i,line in ipairs(lines) do
-			local hit = cursor.line_i == i
+			local hit = self.hit_line_i == i
 			local x = x + line.x
 			local y = y + line.y
 			rect(cr, hit and '#f22' or '#222', x + line.hlsb, y, line.w, -line.spacing_ascent)
@@ -170,26 +179,41 @@ function win:repaint()
 			dot(cr, '#ff0', x + line.advance_x, y, 8)
 			local ax = x
 			local ay = y
+			if self.hit_seg then
+				--pp(self.hit_seg and self.hit_seg.index, self.hit_cursor_i)--, self.hit_seg.glyph_run.cursor_offsets)
+			end
 			for i,seg in ipairs(line) do
 				local run = seg.glyph_run
-				local hit = hit and cursor.seg_i == i
+				local hit = hit and self.hit_seg == seg
 				rect(cr, hit and '#f00' or '#555', ax + run.hlsb, ay + run.htsb, run.w, run.h)
-				dot(cr, '#f0f', ax, ay, 4)
-				dot(cr, '#0f0', ax + run.advance_x, ay, 6)
+				dot(cr, '#f0f', ax, ay, 6)
+				dot(cr, '#f0f', ax + run.advance_x, ay, 6)
+				do
+					local ay = ay + (seg.index - 1) * 10
+					if seg.glyph_run.rtl then
+						arrow(cr, '#f00', ax + run.advance_x, ay, ax, ay + 10)
+					else
+						arrow(cr, '#66f', ax, ay, ax + run.advance_x, ay + 10)
+					end
+				end
 				for i,cx in ipairs(run.cursor_xs) do
 					local px = ax + cx
-					local hit = hit and cursor.cursor_i == i
+					local hit = hit and self.hit_cursor_i == i
 					dot(cr, '#0ff', px, ay, 3)
 				end
 				ax = ax + run.advance_x
 			end
 		end
 
+		if self.hit_line_i then
+			local x, y, h = lines:cursor_pos(self.hit_seg, self.hit_cursor_i)
+			--rect(cr, '#f00', x-3, y, 6, h)
+		end
+
+		cursor = cursor or segs:cursor()
+		cursor:setlines(lines)
 		local x, y, h = cursor:pos()
-		rect(cr, '#fff', x, y, 2, h)
-
-		rect(cr, '#f00', cx, cy, 2, h)
-
+		rect(cr, '#fff', x-1, y, 2, h)
 	end
 
 	--local s = (time.clock() - t0)
@@ -202,26 +226,42 @@ function win:repaint()
 end
 
 function win:mousemove(mx, my)
-	if not cursor then return end
-	cursor:move_to_pos(mx, my)
-	self:invalidate()
+	if lines then
+		self.hit_line_i, self.hit_seg, self.hit_cursor_i = lines:hit_test(mx, my)
+		if cursor then
+			cursor:move_to(mx, my)
+		end
+		self:invalidate()
+	end
 end
 
-function win:keydown(key)
+function win:keypress(key)
+	if not cursor then return end
 
-	if key == 'enter' then
+	if key == 'k' then
 		require'inspect'({tr, lines}, {
 			process = function(v)
 				if v == '_next' or v == '_prev' then return end
 				return v
 			end,
 		})
+	elseif key == 'enter' then
+
+		for seg_i,seg in ipairs(segs) do
+			local run = seg.glyph_run
+			for i=1,#run.cursor_offsets do
+				print(seg_i, seg.offset + run.cursor_offsets[i], run.cursor_xs[i])
+			end
+		end
+
 	end
 
 	if key == 'right' then
-			--if self.hit_text_run
+		cursor:move'next'
+		self:invalidate()
 	elseif key == 'left' then
-
+		cursor:move'prev'
+		self:invalidate()
 	end
 end
 

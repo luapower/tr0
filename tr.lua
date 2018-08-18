@@ -207,13 +207,6 @@ function tr:shape_text_run(
 	hb_buf:set_script(script)
 	hb_buf:set_language(lang)
 
-	--ignore trailing line breaks, if any
-	for i = str_offset+len-1, str_offset, -1 do
-		if isnewline(str[i]) then
-			len = len - 1
-		end
-	end
-
 	hb_buf:add_codepoints(str, str_len, str_offset, len)
 
 	zone'hb_shape_full'
@@ -253,11 +246,11 @@ function tr:shape_text_run(
 	zone()
 
 	zone'hb_shape_cursor_pos'
-	local cursor_offsets = {} --{i1, ...}
-	local cursor_xs = {} --{x1, ...}
+	local cursor_offsets = {} --{i1, ...} in visual order
+	local cursor_xs = {} --{x1, ...} in visual order
 	local grapheme_breaks
 
-	local function add_pos(
+	local function add_cursor(
 		glyph_offset, glyph_count,
 		cluster, cluster_len, cluster_x
 	)
@@ -327,13 +320,11 @@ function tr:shape_text_run(
 
 	if rtl then
 		local last_i, last_glyph_count, last_cluster, last_cluster_len, last_cluster_x
-		if len > 0 then
-			local first_cluster = len
-			local first_cluster_x = glyph_pos[0].x_offset / 64
-			push(cursor_offsets, first_cluster)
-			push(cursor_xs, first_cluster_x)
-			last_cluster = first_cluster
-		end
+		local first_cluster = len
+		local first_cluster_x = len > 0 and glyph_pos[0].x_offset / 64 or ax
+		push(cursor_offsets, first_cluster)
+		push(cursor_xs, first_cluster_x)
+		last_cluster = first_cluster
 		for i, glyph_count, cluster in rle_runs(
 			glyph_info, glyph_count, get_cluster
 		) do
@@ -341,15 +332,18 @@ function tr:shape_text_run(
 			local cluster_len = last_cluster - cluster
 			last_cluster_x = glyph_pos[i].x_offset / 64
 			if last_i then
-				add_pos(last_i, last_glyph_count, last_cluster, last_cluster_len, last_cluster_x)
+				add_cursor(last_i, last_glyph_count, last_cluster, last_cluster_len, last_cluster_x)
 			end
 			last_i, last_glyph_count, last_cluster, last_cluster_len =
 				i, glyph_count, cluster, cluster_len
 		end
 		if last_i then
 			last_cluster_x = ax
-			add_pos(last_i, last_glyph_count, last_cluster, last_cluster_len, last_cluster_x)
+			add_cursor(last_i, last_glyph_count, last_cluster, last_cluster_len, last_cluster_x)
 		end
+		--keep cursors in logical order, easier for navigation.
+		reverse(cursor_offsets)
+		reverse(cursor_xs)
 	else
 		local last_i, last_glyph_count, last_cluster, last_cluster_x
 		for i, glyph_count, cluster in rle_runs(
@@ -359,14 +353,14 @@ function tr:shape_text_run(
 			local cluster_x = glyph_pos[i].x_offset / 64
 			if last_cluster then
 				local last_cluster_len = cluster - last_cluster
-				add_pos(last_i, last_glyph_count, last_cluster, last_cluster_len, last_cluster_x)
+				add_cursor(last_i, last_glyph_count, last_cluster, last_cluster_len, last_cluster_x)
 			end
 			last_i, last_glyph_count, last_cluster, last_cluster_x =
 				i, glyph_count, cluster, cluster_x
 		end
 		if last_i then
 			local last_cluster_len = len - last_cluster
-			add_pos(last_i, last_glyph_count, last_cluster, last_cluster_len, last_cluster_x)
+			add_cursor(last_i, last_glyph_count, last_cluster, last_cluster_len, last_cluster_x)
 		end
 		push(cursor_offsets, len)
 		push(cursor_xs, ax)
@@ -381,20 +375,20 @@ function tr:shape_text_run(
 		len = glyph_count,
 		info = glyph_info,
 		pos = glyph_pos,
-		--for positioning in horizontal flow
+		hb_buf = hb_buf, --anchored
+		--for creating horizontal flow
 		advance_x = ax,
-		--for positioning in vertical flow (NYI)
+		--for creating vertical flow (NYI)
 		advance_y = ay,
 		--for vertical alignment, line spacing and line hit-testing
 		ascent = font.ascent,
 		descent = font.descent,
-		--for horizontal alignment and for line wrapping
+		--for horizontal alignment and for line wrapping of horizontal text
 		hlsb = bx, --left-side-bearing for horizontal flow
-		htsb = by, --top-side bearing for horizontal flow
-		w = bw,
-		h = bh,
+		htsb = by, --top-side bearing for horizontal flow (not used)
+		w = bw, --bounding-box width
+		h = bh, --bounding-box height (not used)
 		--for lru cache
-		hb_buf = hb_buf,
 		mem_size =
 			224 + hb_glyph_size * math.max(len, glyph_count) --hb_buffer_t
 			+ 400 --this table
@@ -410,17 +404,26 @@ function tr:shape_text_run(
 end
 
 function tr:glyph_run(
-	str, str_len, i, len,
+	str, str_len, str_offset, len,
 	font, font_size, features, feat_count, rtl, script, lang
 )
+	--ignore trailing line breaks, if any.
+	--NOTE: this can result in an empty run, which is ok, we still need
+	--the linebreak flag and a cursor position even on a zero-glyph run.
+	for i = str_offset+len-1, str_offset, -1 do
+		if isnewline(str[i]) then
+			len = len - 1
+		end
+	end
+
 	font:ref()
-	local text_hash = tonumber(xxhash64(str + i, 4 * len, 0))
+	local text_hash = tonumber(xxhash64(str + str_offset, 4 * len, 0))
 	local lang_id = tonumber(lang) or false
 	local key = font.tuple(text_hash, font_size, rtl, script, lang_id)
 	local glyph_run = self.glyph_runs:get(key)
 	if not glyph_run then
 		glyph_run = self:shape_text_run(
-			str, str_len, i, len,
+			str, str_len, str_offset, len,
 			font, font_size, features, feat_count, rtl, script, lang
 		)
 		self.glyph_runs:put(key, glyph_run)
@@ -598,6 +601,7 @@ function tr:shape(text_tree)
 
 	zone'segment'
 	local offset = 0
+	local seg_i = 0
 	local text_run_index = 1
 	local text_run = text_runs[1]
 	local level, script, lang
@@ -643,7 +647,8 @@ function tr:shape(text_tree)
 		end
 
 		::process::
-		push(segments, {
+		seg_i = seg_i + 1
+		segments[seg_i] = {
 			--reusable part
 			glyph_run = self:glyph_run(
 				vstr, len, offset, i - offset,
@@ -659,10 +664,11 @@ function tr:shape(text_tree)
 			bidi_level = level, --for bidi reordering
 			linebreak = linebreak == 0, --hard break; for layouting
 			line_spacing = text_run.line_spacing, --for layouting
-			--for cursor positioning and hit testing
+			--for cursor positioning
 			text_run = text_run,
 			offset = offset,
-		})
+			index = seg_i,
+		}
 		offset = i
 
 		::advance::
@@ -693,7 +699,7 @@ function segments:layout(x, y, w, h, halign, valign)
 	zone'linewrap'
 	local line
 	local ax, dx --line x-advance for line width calculation.
-	local line_i = 1
+	local line_i = 0
 	for seg_i, seg in ipairs(self) do
 		local run = seg.glyph_run
 		if not line or line.advance_x + dx + run.hlsb + run.w > w then
@@ -706,14 +712,14 @@ function segments:layout(x, y, w, h, halign, valign)
 				ascent = 0, descent = 0,
 				spacing_ascent = 0, spacing_descent = 0,
 			}
-			lines[line_i] = line
 			line_i = line_i + 1
+			lines[line_i] = line
 		end
 		line.w = ax + run.hlsb + run.w
 		line.advance_x = line.advance_x + run.advance_x
 		ax = ax + run.advance_x
 		push(line, seg)
-		lines.segmap[seg_i] = line_i
+		lines.segmap[seg] = line_i --for cursor positioning
 		if seg.linebreak then
 			line = nil
 		end
@@ -723,6 +729,7 @@ function segments:layout(x, y, w, h, halign, valign)
 	--reorder RTL segments on each line separately and concatenate the runs.
 	zone'reorder'
 	for _,line in ipairs(lines) do
+		--link segments with a `next` field as expected by reorder_runs().
 		local n = #line
 		for i,seg in ipairs(line) do
 			seg.next = line[i+1] or false
@@ -835,10 +842,65 @@ end
 
 --hit testing and cursor positions -------------------------------------------
 
+local function cmp_offsets(seg, offset)
+	return seg.offset <= offset
+end
+function segments:cursor_at_text_offset(text_offset)
+	local seg_i = (binsearch(text_offset, self, cmp_offsets) or #self + 1) - 1
+	local seg = self[seg_i]
+	local offsets = seg.glyph_run.cursor_offsets
+	local cursor_i = binsearch(text_offset - seg.offset, offsets)
+	return seg, cursor_i
+end
+
+function segments:text_offset_at_cursor(seg, cursor_i)
+	return seg.offset + seg.glyph_run.cursor_offsets[cursor_i]
+end
+
+--move `delta` cursor positions from a certain cursor position.
+function segments:next_cursor(seg, cursor_i, delta)
+	delta = math.floor(delta) --prevent infinite loop
+	if delta ~= 0 then
+		local step = delta > 0 and 1 or -1
+		while delta ~= 0 do
+			local i = cursor_i + step
+			if (step < 0 and i < 1) or i > #seg.glyph_run.cursor_offsets then
+				local next_seg = self[seg.index + step]
+				if not next_seg then
+					break
+				end
+				seg = next_seg
+				i = step > 0 and 1 or #seg.glyph_run.cursor_offsets
+			end
+			cursor_i = i
+			delta = delta - step
+		end
+	end
+	return seg, cursor_i, delta
+end
+
+--move `delta` cursor positions into the logical text.
+function segments:next_text_offset(text_offset, delta)
+	local step = delta > 0 and 1 or -1
+	local seg, cursor_i = self:cursor_at_text_offset(text_offset)
+	while true do
+		seg, cursor_i, delta = self:next_cursor(seg, cursor_i, delta)
+		if delta ~= 0 then
+			break --partial advance
+		elseif self:text_offset_at_cursor(seg, cursor_i) == text_offset then
+			break
+			--delta = step --same offset, go further
+		else
+			break --diff. offset
+		end
+	end
+	return self:text_offset_at_cursor(seg, cursor_i), seg, cursor_i, delta
+end
+
 local function cmp_ys(line, y)
 	return line.y - line.spacing_descent < y
 end
-function lines:hit_test_line(x, y,
+function lines:hit_test_lines(x, y,
 	extend_top, extend_bottom, extend_left, extend_right
 )
 	x = x - self.x
@@ -856,76 +918,56 @@ function lines:hit_test_line(x, y,
 	end
 end
 
-local function cmp_reverse(x, y) return y < x end
-
-function lines:hit_test(x, y,
-	extend_top, extend_bottom, extend_linegap, extend_left, extend_right
-)
-	local line_i = self:hit_test_line(x, y,
-		extend_top, extend_bottom, extend_linegap, extend_left, extend_right
-	)
-	if not line_i then return nil end
-	local line = self[line_i]
-
+function lines:hit_test_cursors(line, x, y)
 	local ax = self.x + line.x
 	local ay = self.y + self.baseline + line.y
-
-	for seg_i, seg in ipairs(line) do
+	for _,seg in ipairs(line) do
 		local run = seg.glyph_run
 		local x = x - ax
 		if x >= 0 and x <= run.advance_x then --hit inside segment
 			--find the cursor position closest to x.
 			local xs = run.cursor_xs
-			local i = binsearch(x, xs) or #xs
-			if i > 1 and x - xs[i-1] < xs[i] - x then
-				i = i - 1
+			local min_d, cursor_i = 1/0
+			for i = 1, #xs do
+				local d = math.abs(xs[i] - x)
+				if d < min_d then
+					min_d, cursor_i = d, i
+				end
 			end
-			local text_offset = seg.offset + run.cursor_offsets[i]
-			return line_i, seg_i, i, text_offset
+			return seg, cursor_i
 		end
 		ax = ax + run.advance_x
 		ay = ay + run.advance_y
 	end
 end
 
-function lines:cursor_at(text_offset)
-	--TODO: binsearch on lines and segments
-	if text_offset < 0 then
-		return 1, 1, 1, text_offset
-	end
-	local last_line_i, last_seg_i, last_cursor_i
-	for line_i, line in ipairs(self) do
-		local next_line = self[line_i+1]
-		for seg_i, seg in ipairs(line) do
-			local next_seg = line[seg_i+1] or (next_line and next_line[1])
-			local next_offset = next_seg and next_seg.offset or 1/0
-			if text_offset >= seg.offset and text_offset < next_offset then
-				local seg_offset = text_offset - seg.offset
-				local offsets = seg.glyph_run.cursor_offsets
-				for cursor_i, offset in ipairs(offsets) do
-					local dir = seg.glyph_run.rtl and -1 or 1
-					local next_offset = offsets[cursor_i + dir] or 1/0
-					if seg_offset >= offset and seg_offset < next_offset then
-						return line_i, seg_i, cursor_i, offset
-					end
-					last_cursor_i = cursor_i
-				end
-			end
-			last_seg_i = seg_i
-		end
-		last_line_i = line_i
-	end
-	return last_line_i, last_seg_i, last_cursor_i, text_offset
+function lines:hit_test(x, y, ...)
+	local line_i = self:hit_test_lines(x, y, ...)
+	if not line_i then return nil end
+	return line_i, self:hit_test_cursors(self[line_i], x, y)
 end
 
-function lines:cursor_pos(line_i, seg_i, cursor_i)
-	local line = self[line_i]
+function lines:cursor_at_text_offset(text_offset)
+	return self.segments:cursor_at_text_offset(text_offset)
+end
+
+function lines:text_offset_at_cursor(seg, cursor_i)
+	return self.segments:text_offset_at_cursor(seg, cursor_i)
+end
+
+function lines:cursor_pos(seg, cursor_i)
+	local line = self[self.segmap[seg]]
 	local ax = self.x + line.x
 	local ay = self.y + self.baseline + line.y
-	for i, seg in ipairs(line) do
+	--TODO: store segment offsets to avoid O(n) when displaying cursors?
+	local target_seg = seg
+	for _,seg in ipairs(line) do
 		local run = seg.glyph_run
-		if i == seg_i then
-			return ax + run.cursor_xs[cursor_i], ay
+		if seg == target_seg then
+			return
+				ax + run.cursor_xs[cursor_i],
+				ay - line.ascent,
+				line.ascent - line.descent --cursor height
 		end
 		ax = ax + run.advance_x
 		ay = ay + run.advance_y
@@ -946,47 +988,64 @@ function segments:cursor(text_offset)
 	}, self.tr.cursor_class)
 end
 
-function cursor:get()
-	return self.line_i, self.seg_i, self.cursor_i, self.text_offset
-end
-
-function cursor:set(line_i, seg_i, cursor_i, text_offset)
-	assert(text_offset)
-	self.line_i, self.seg_i, self.cursor_i, self.text_offset =
-		line_i, seg_i, cursor_i, text_offset
-	self.x, self.y = self.lines:cursor_pos(line_i, seg_i, cursor_i)
-end
-
-function cursor:set_lines(lines)
-	if self.lines == lines then return end
+function cursor:setlines(lines)
+	assert(lines.segments == self.segments)
 	self.lines = lines
-	self:set(self.lines:cursor_at(self.text_offset))
 end
 
-function cursor:move_to_offset(text_offset)
-	self:set(self.lines:cursor_at(text_offset))
-end
-
-function cursor:move_to_pos(x, y, ...)
-	local line_i, seg_i, cursor_i, text_offset = self.lines:hit_test(x, y, ...)
-	if not line_i then return end
-	self:set(line_i, seg_i, cursor_i, text_offset)
-end
-
-function cursor:pos(text_offset)
-	local x, y, h, line_i, seg_i, cursor_i
-	if text_offset then
-		line_i, seg_i, cursor_i = self.lines:cursor_at(text_offset)
-		x, y = self.lines:cursor_pos(line_i, seg_i, cursor_i)
-	else
-		line_i, x, y = self.line_i, self.x, self.y
+--text position -> layout position.
+function cursor:pos()
+	if not self.seg then
+		self.seg, self.cursor_i =
+			self.lines:cursor_at_text_offset(self.text_offset)
 	end
-	local h = -self.lines[line_i].ascent
-	return x, y, h
+	return self.lines:cursor_pos(self.seg, self.cursor_i)
 end
 
-function cursor:move(dir)
-	--
+--layout position -> text position.
+function cursor:hit_test(x, y, ...)
+	local line_i, seg, cursor_i = self.lines:hit_test(x, y, ...)
+	if not line_i then return nil end
+	return self.lines:text_offset_at_cursor(seg, cursor_i), seg, cursor_i
+end
+
+--move based on a layout position.
+function cursor:move_to(x, y, ...)
+	local text_offset, seg, cursor_i = self:hit_test(x, y, ...)
+	if text_offset then
+		self.text_offset, self.seg, self.cursor_i = text_offset, seg, cursor_i
+	end
+end
+
+function cursor:move_pos(dir, delta, text_offset)
+	text_offset = text_offset or self.text_offset
+	if dir == 'prev' or dir == 'next' then
+		local step = dir == 'next' and 1 or -1
+		local delta = (delta or 1) * step
+		local seg, cursor_i = self.seg, self.cursor_i
+		::again::
+		seg, cursor_i, delta = self.segments:next_cursor(seg, cursor_i, delta)
+		if delta == 0
+			and self.segments:text_offset_at_cursor(seg, cursor_i) == text_offset
+			and self.lines:cursor_pos(seg, cursor_i) == self:pos()
+		then
+			--duplicate cursor (same text position and screen position):
+			--advance further until a different one is found.
+			delta = step
+			goto again
+		end
+		local text_offset = self.segments:text_offset_at_cursor(seg, cursor_i)
+		return text_offset, seg, cursor_i, delta
+	--elseif dir == 'up' or dir == 'down' then
+
+	else
+		assert(false, 'invalid direction %s', dir)
+	end
+end
+
+function cursor:move(dir, delta, text_offset)
+	self.text_offset, self.seg, self.cursor_i =
+		self:move_pos(dir, delta, text_offset)
 end
 
 return tr
