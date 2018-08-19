@@ -148,8 +148,8 @@ function win:repaint()
 			},
 
 			{'المفاتيح\n'},
-			{color = '#ff0', 'المفاتيح ABC\n'},
-			{color = '#f6f', 'ABC المفاتيح'},
+			{color = '#ff0', 'ال(مف)اتيح ABC\n'},
+			{color = '#f6f', 'A(B)C المفاتيح'},
 
 			{
 				--{font_name = 'eb garamond, 100',

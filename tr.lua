@@ -478,13 +478,12 @@ local alloc_langs = growbuffer'hb_language_t[?]'
 local alloc_bidi_types = growbuffer'FriBidiCharType[?]'
 local alloc_bracket_types = growbuffer'FriBidiBracketType[?]'
 local alloc_levels = growbuffer'FriBidiLevel[?]'
-local alloc_vstr = growbuffer'FriBidiChar[?]'
 local alloc_linebreaks = growbuffer'char[?]'
 
 local tr_free = tr.free
 function tr:free()
 	alloc_str, alloc_scripts, alloc_langs,
-	alloc_bidi_types, alloc_bracket_types, alloc_levels, alloc_vstr,
+	alloc_bidi_types, alloc_bracket_types, alloc_levels,
 	alloc_linebreaks, alloc_grapheme_breaks = nil
 	tr_free(self)
 end
@@ -566,11 +565,11 @@ function tr:shape(text_tree)
 	end
 
 	--Run fribidi over the entire text as follows:
-	--Request mirroring since it's part of BiDi and harfbuzz doesn't do that.
+	--Skip mirroring since harfbuzz seems to do that.
 	--Skip arabic shaping since harfbuzz does that better with font assistance.
 	--Skip RTL reordering because 1) fribidi also reverses the _contents_ of
 	--the RTL runs which harfbuzz also does, and 2) because bidi reordering
-	--needs to be done after line breaking and is thus part of layouting.
+	--needs to be done after line breaking and so it's part of layouting.
 	zone'bidi'
 	local dir = (text_tree.dir or 'auto'):lower()
 	local fb_dir =
@@ -581,20 +580,17 @@ function tr:shape(text_tree)
 	local bidi_types    = alloc_bidi_types(len)
 	local bracket_types = alloc_bracket_types(len)
 	local levels        = alloc_levels(len)
-	local vstr          = alloc_vstr(len)
 
 	fb.bidi_types(str, len, bidi_types)
 	fb.bracket_types(str, len, bidi_types, bracket_types)
 	assert(fb.par_embedding_levels(bidi_types, bracket_types, len, fb_dir, levels))
-	ffi.copy(vstr, str, len * 4)
-	fb.shape_mirroring(levels, len, vstr)
 	zone()
 
 	--run Unicode line breaking over each run of text with same language.
 	zone'linebreak'
 	local linebreaks = alloc_linebreaks(len)
 	for i, len, lang in rle_runs(langs, len) do
-		ub.linebreaks(vstr + i, len, ub_lang(lang), linebreaks + i)
+		ub.linebreaks(str + i, len, ub_lang(lang), linebreaks + i)
 	end
 	zone()
 
@@ -653,7 +649,7 @@ function tr:shape(text_tree)
 		segments[seg_i] = {
 			--reusable part
 			glyph_run = self:glyph_run(
-				vstr, len, offset, i - offset,
+				str, len, offset, i - offset,
 				text_run.font,
 				text_run.font_size,
 				text_run.features,

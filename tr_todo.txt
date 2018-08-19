@@ -8,8 +8,6 @@ font modifiers:
 	- bold/b..., italic/oblique/i
 	- %size, big, small
 
-- rtl: fix hit testing
-
 - rtl: fix line width computation
 
 - rtl: test cursor position with mirroring implications
@@ -17,8 +15,6 @@ font modifiers:
 - font_variant: normal, smallcaps; smallcaps modifier
 
 - raise: raise, subscript, superscript, sub, sup
-
-- color
 
 - opacity
 	- apply on the whole run
