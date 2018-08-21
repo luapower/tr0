@@ -9,25 +9,6 @@ local color = require'color'
 
 local tr = tr()
 
-nw:app():maxfps(1/0)
-
-local function fps_function()
-	local count_per_sec = 2
-	local frame_count, last_frame_count, last_time = 0, 0
-	return function()
-		last_time = last_time or time.clock()
-		frame_count = frame_count + 1
-		local time = time.clock()
-		if time - last_time > 1 / count_per_sec then
-			last_frame_count, frame_count = frame_count, 0
-			last_time = time
-		end
-		return last_frame_count * count_per_sec
-	end
-end
-
-local fps = fps_function()
-
 local win = nw:app():window{
 	x = 100, y = 60,
 	w = 1800, h = 900,
@@ -46,6 +27,9 @@ local function gfont(name)
 end
 
 gfont'eb garamond'
+gfont'eb garamond italic'
+gfont'eb garamond bold'
+gfont'eb garamond bold italic'
 gfont'dancing script'
 gfont'open sans'
 gfont'open sans italic'
@@ -75,7 +59,25 @@ local function rect(cr, col, x, y, w, h)
 	cr:restore()
 end
 
-local function arrow(cr, col, x, y, x2, y2)
+local function triangle(cr, col, x, y, w, angle)
+	local r, g, b, a = color.parse(col, 'rgb')
+	angle = math.rad(angle)
+	local h = math.sqrt(3) / 2 * w
+	cr:save()
+	cr:new_path()
+	cr:translate(x, y)
+	cr:rotate(angle)
+	cr:translate(-w/2, -h)
+	cr:move_to(0, 0)
+	cr:rel_line_to(w, 0)
+	cr:rel_line_to(-w/2, h)
+	cr:close_path()
+	cr:rgba(r, g, b, a or 1)
+	cr:fill()
+	cr:restore()
+end
+
+local function straightline(cr, col, x, y, x2, y2)
 	local r, g, b, a = color.parse(col, 'rgb')
 	cr:save()
 	cr:new_path()
@@ -85,6 +87,11 @@ local function arrow(cr, col, x, y, x2, y2)
 	cr:rgba(r, g, b, a or 1)
 	cr:stroke()
 	cr:restore()
+end
+
+local function vector(cr, col, x, y, x2, y2)
+	straightline(cr, col, x, y, x2, y2)
+	triangle(cr, col, x2, y2, 8, -90 + math.deg(math.atan2(y2-y, x2-x)))
 end
 
 local function dot(cr, col, x, y, size)
@@ -102,11 +109,10 @@ local text = require'glue'.readfile('winapi_history.md')
 local segs, lines, cursor
 
 function win:repaint()
-	self:title(string.format('%d fps', fps()))
-
 	local cr = self:bitmap():cairo()
 	--cr:rgb(1, 1, 1); cr:paint(); cr:rgb(0, 0, 0)
 	cr:rgb(0, 0, 0); cr:paint(); cr:rgb(1, 1, 1)
+	--cr:identity_matrix():rotate_around(500, 400, math.rad(-30))
 
 	local t0 = time.clock()
 
@@ -130,31 +136,24 @@ function win:repaint()
 
 		segs = segs or tr:shape
 		{
-			line_spacing = 1.5,
+			line_spacing = 1.2,
 			--dir = 'rtl',
 			--{'A'},
-			font_name = 'amiri,100',
+			font_name = 'amiri,80',
+
+			--{'المفاتيح\n'},
+			{color = '#ff0', 'ال(مف)اتيح ABC\r\n'},
+			{color = '#f6f', 'A(B)C المفاتيح\u{2029}'},
+
 			{
-				line_spacing = 1.2,
-
-				--font_name = 'eb garamond, 200',
+				line_spacing = 1,
+				font_name = 'eb garamond, 50',
 				--font_name = 'open sans, 200',
-				--'خمسة المفاتيح'
-
 				--multiple glyphs with the same cluster value
 				--{'\x15\x09\0\0\x4D\x09\0\0\x15\x09\0\0\x3F\x09\0\0\x15\x09\0\0', charset = 'utf32'},
 				--{'\x15\x09\0\0\x4D\x09\0\0\x15\x09\0\0\x3F\x09\0\0\x15\x09\0\0', charset = 'utf32'},
-				--'BDgt \u{65}\u{301}ffi fi D\r\nTd  VA Dg'
-			},
-
-			{'المفاتيح\n'},
-			{color = '#ff0', 'ال(مف)اتيح ABC\n'},
-			{color = '#f6f', 'A(B)C المفاتيح'},
-
-			{
-				--{font_name = 'eb garamond, 100',
-				--'fa AVy ffix xfl lg MM f\n',
-				--{'DEF EF F D glm\n'},
+				'\u{65}\u{301}ff',
+				'i fi mTm', {i=1, 'VA', {b=1, 'Dg', {i=false, 'dT\n'}}},
 			},
 
 			--{font_name = 'eb garamond, 100', 'ffix xfl ffi fl\n'},
@@ -188,9 +187,9 @@ function win:repaint()
 				do
 					local ay = ay + (seg.index - 1) * 10
 					if seg.glyph_run.rtl then
-						arrow(cr, '#f00', ax + run.advance_x, ay, ax, ay + 10)
+						vector(cr, '#f00', ax + run.advance_x, ay, ax, ay + 10)
 					else
-						arrow(cr, '#66f', ax, ay, ax + run.advance_x, ay + 10)
+						vector(cr, '#66f', ax, ay, ax + run.advance_x, ay + 10)
 					end
 				end
 				for i,cx in ipairs(run.cursor_xs) do
@@ -204,22 +203,17 @@ function win:repaint()
 
 		if self.hit_cursor_i then
 			local x, y, h = lines:cursor_pos(self.hit_seg, self.hit_cursor_i)
-			--rect(cr, '#f00', x-3, y, 6, h)
+			rect(cr, '#f00', x-4, y, 8, h)
 		end
 
 		cursor = cursor or segs:cursor()
 		cursor:setlines(lines)
-		local x, y, h = cursor:pos()
-		rect(cr, '#fff', x-1, y, 2, h)
+		local x, y, h, rtl = cursor:pos()
+		vector(cr, '#fff', x, y, x, y+h)
+		local w = (rtl and 10 or -10)
+		triangle(cr, '#fff', x-w*.8, y, w, 90)
 	end
 
-	--local s = (time.clock() - t0)
-	--print(string.format('%0.2f ms    %d fps', s * 1000, 1 / s))
-	--print(string.format('word  cache size:  %d KB', tr.glyph_runs.total_size / 1024))
-	--print(string.format('word  count:       %d   ', tr.glyph_runs.lru.length))
-	--print(string.format('glyph cache size:  %d KB', tr.rs.glyphs.total_size / 1024))
-	--print(string.format('glyph count:       %d   ', tr.rs.glyphs.lru.length))
-	--self:invalidate()
 end
 
 function win:mousemove(mx, my)

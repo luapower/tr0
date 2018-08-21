@@ -22,9 +22,15 @@ setmetatable(cairo_rs, cairo_rs)
 
 cairo_rs.rasterize_glyph_ft = rs_ft.rasterize_glyph
 
-function cairo_rs:rasterize_glyph(font, font_size, glyph_index, x_offset, y_offset)
+function cairo_rs:rasterize_glyph(
+	font, font_size, glyph_index,
+	x_offset, y_offset, angle
+)
 
-	local glyph = self:rasterize_glyph_ft(font, font_size, glyph_index, x_offset, y_offset)
+	local glyph = self:rasterize_glyph_ft(
+		font, font_size, glyph_index,
+		x_offset, y_offset, angle
+	)
 
 	if glyph.bitmap then
 

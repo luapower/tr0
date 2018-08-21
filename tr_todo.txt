@@ -2,100 +2,129 @@ RESEARCH ---------------------------------------------------------------------
 
 - how does harfbuzz select charmap?
 
-FEATURES ---------------------------------------------------------------------
+FEATURES / NOW ---------------------------------------------------------------
 
-font modifiers:
-	- bold/b..., italic/oblique/i
+- lines:relayout(w, h, valign, halign)
+
+- follow tabstops (for codedit)
+
+- font modifiers:
 	- %size, big, small
 
-- rtl: fix line width computation
+- run size/positioning modifiers:
+	- raise: raise, subscript, superscript, sub, sup
 
-- rtl: test cursor position with mirroring implications
+- halign: justify.
 
-- font_variant: normal, smallcaps; smallcaps modifier
-
-- raise: raise, subscript, superscript, sub, sup
-
-- opacity
+- opacity:
 	- apply on the whole run
-	- optimize to only do that if the runs are ligated
+		- optimize to only do that if the runs are ligated (how can we know?)
 
-- paragraph splitting at PS
+- nowrap attribute (gsub space with NBSP).
 
-- p attribute
+- html-like markup parser with tags, attributes and escapes.
 
-- br attribute
+- font_db selector: stretch/condensed...
 
-- nowrap attribute
+- glyph substitution:
+	- font_override text attribute for manual override.
+	- register fallback fonts for script/language and try them in order.
+	- match original font's size, weight, slant, stretch.
+	- cache the substitutions.
+
+
+LATER ------------------------------------------------------------------------
+
+- p attribute (add a PS for now; makes text more portable too).
+
+- underline / strikethrough:
+	- color, thickness, style (single, double, wavy, image), dashes.
+
+- vertical alignment top/bottom margins option:
+	- ascent/descent
+	- spacing_ascent/spacing_descent
+	- paragraph_ascent/paragraph_descent
+
+
+ADVANCED LAYOUTING -----------------------------------------------------------
+
+- vertical layouts:
+	- gravity, gravity_hint?
+
+- hb_feature modifiers:
+	- font_variant: normal, smallcaps; smallcaps modifier
 
 - bug: shaping words separately breaks contextual ligatures.
 	- see: https://bugzilla.mozilla.org/show_bug.cgi?id=761442
+	- is that true even if we call harfbuzz with the whole string and an offset?
 
-- plaintext: follow tabstops, preserve whitespace widths.
+- allow varying the formatting attributes (color, underline, etc.) within
+a single shaped word, IOW consecutive text runs where only formatting attributes
+are changed between runs should be shaped as a whole to preserve ligatures.
 
-- underline / strikethrough:
-	- skip descenders (trick: use white shadow around text)
-	- color, thickness, style (single, double, wavy, image), dashes
+- allow varying the formatting attributes within a single grapheme, IOW
+allow coloring the diacritical marks differently than the base glyph.
 
-- font_db: stretch/condensed...
+- underline to skip descenders:
+	- fast outline intersection algorithm + caching the results.
 
-- halign: justify
-
-- wrapping algos: greedy, knuth
-
-- letter spacing
-	- identify breaking points (see HB_UNSAFE_TO_BREAK_HERE flag)
-	- adjust justification to include letter spacing
-
-- tabstops: width
-
-- wrap inside path
-
-- bounding box with/without ascents/descents
-
-- html-like markup parser
-
-- language/script font override
-
-- glyph substitution
-	- register fallback fonts for script/language and try them in order
-	- match original font's size, weight, slant, stretch
-	- cache the substitutions
+- knuth's line wrapping algorithm.
 
 - hyphenation: https://github.com/hunspell/hyphen (what libreoffice uses)
 
-- coloring half-ligatures, see hb_ot_layout_get_ligature_carets
+- letter spacing:
+	- identify breaking points (see HB_UNSAFE_TO_BREAK_HERE flag).
+	- adjust justification algorithm to include letter spacing.
 
-- rotation, translation, scale, shear, matrix for each run
+- line wrapping inside an arbitrary enclosure (path).
 
-- arbitrary path baseline
-	- same breaking points as for letter-spacing
-	- translate & rotate glyphs to match path's normals at glyph's center
+- text rotation at arbitrary angles using rotated outlines:
+	- convert glyph runs to cairo path objects and rasterize with cairo.
 
-- show hex boxes for:
-	- invalid bytes
-	- missing glyphs
-	- control characters
+- arbitrary path baseline (eg. for names on maps):
+	- same breaking points as for letter-spacing.
+	- translate & rotate glyphs to match path's normals at glyph's center.
 
-- vertical layouts
-	- gravity, gravity_hint?
-
-- advanced arbitrary path baseline
+- advanced arbitrary path baseline (i.e. distorted glyphs):
 	- extract glyphs outlines
 	- break outlines into polygons
 	- distort points based on path's normal vectors
 	- rasterize new distorted outline
 
+
 EDITING ----------------------------------------------------------------------
 
-- mark invisible characters positions
-	- ZW-NBSP: prevents ligatures
-	- NBSP: prevents word-wrapping
-	- SOFT HYPHEN: hyphenate if word-wrapping
-	- ZWJ: force joining
-	- ZWNJ: prevent joining
-	- WORD JOINER: ZW-NBSP-like
-	- LTR/RTL modifiers
-	- variation selectors
-	- hangul fillers
-- mark look-alike characters:   ; ꓸ ꓹ ꓽ
+- insert mode cursor
+
+- IME integration
+
+- unicode debugging / visual editing aids:
+
+	- show hex boxes for:
+		- invalid bytes
+		- missing glyphs
+		- control characters
+
+	- mark invisible characters positions:
+		- ZW-NBSP: prevents ligatures
+		- NBSP: prevents word-wrapping
+		- SOFT HYPHEN: hyphenate if word-wrapping
+		- ZWJ: force joining
+		- ZWNJ: prevent joining
+		- WORD JOINER: ZW-NBSP-like
+		- LTR/RTL modifiers
+		- variation selectors
+		- hangul fillers
+
+	- mark look-alike characters:   ; ꓸ ꓹ ꓽ
+
+	- mark runs by script and language
+
+	- spell checking: upgrade hunspell and integrate it:
+		- highlighting, autocompletion, autocorrection, autoignore, manual ignore.
+
+	- cursor:
+		- show direction
+		- show all codepoints individually between cursor and next cursor
+		- shape/show all graphemes individually between cursor and next cursor
+
