@@ -11,7 +11,7 @@ local tr = tr()
 
 local win = nw:app():window{
 	x = 100, y = 60,
-	w = 1800, h = 900,
+	w = 910, h = 900,
 	--w = 800, h = 600,
 }
 
@@ -137,23 +137,30 @@ function win:repaint()
 		segs = segs or tr:shape
 		{
 			line_spacing = 1.2,
+			paragraph_spacing = 1.5,
 			--dir = 'rtl',
 			--{'A'},
 			font_name = 'amiri,80',
 
 			--{'المفاتيح\n'},
-			{color = '#ff0', 'ال(مف)اتيح ABC\r\n'},
-			{color = '#f6f', 'A(B)C المفاتيح\u{2029}'},
+			--{color = '#ff0', 'ال(مف)اتيح ABC\r\n'},
+			--{color = '#f6f', 'A(B)C المفاتيح\u{2029}'},
 
 			{
 				line_spacing = 1,
 				font_name = 'eb garamond, 50',
+
+				'abc',
+				--{nowrap = true, 'abc def'}, ' xyz ',
+				--{nowrap = true, '123 456 789'}, ' zyz ',
+				--{nowrap = true, 'ABC DEF GH'},
+
 				--font_name = 'open sans, 200',
 				--multiple glyphs with the same cluster value
 				--{'\x15\x09\0\0\x4D\x09\0\0\x15\x09\0\0\x3F\x09\0\0\x15\x09\0\0', charset = 'utf32'},
 				--{'\x15\x09\0\0\x4D\x09\0\0\x15\x09\0\0\x3F\x09\0\0\x15\x09\0\0', charset = 'utf32'},
-				'\u{65}\u{301}ff',
-				'i fi mTm', {i=1, 'VA', {b=1, 'Dg', {i=false, 'dT\n'}}},
+				--'\u{65}\u{301}ff',
+				--'i fi mTm\n\n\n', {i=1, 'VA', {b=1, 'Dg', {i=false, 'dT\n'}}},
 			},
 
 			--{font_name = 'eb garamond, 100', 'ffix xfl ffi fl\n'},
@@ -161,7 +168,7 @@ function win:repaint()
 
 			--{font_name = 'NotoColorEmoji,34', ('\xF0\x9F\x98\x81'):rep(3)},
 		}
-		lines = lines or segs:layout(x, y, w, h, 'center', 'middle')
+		lines = segs:layout(x, y, w, h, 'center', 'middle')
 		lines:paint(cr)
 
 		local x = lines.x

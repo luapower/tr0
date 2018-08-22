@@ -8,23 +8,9 @@ FEATURES / NOW ---------------------------------------------------------------
 
 - follow tabstops (for codedit)
 
-- font modifiers:
-	- %size, big, small
-
-- run size/positioning modifiers:
-	- raise: raise, subscript, superscript, sub, sup
-
 - halign: justify.
 
-- opacity:
-	- apply on the whole run
-		- optimize to only do that if the runs are ligated (how can we know?)
-
 - nowrap attribute (gsub space with NBSP).
-
-- html-like markup parser with tags, attributes and escapes.
-
-- font_db selector: stretch/condensed...
 
 - glyph substitution:
 	- font_override text attribute for manual override.
@@ -32,19 +18,33 @@ FEATURES / NOW ---------------------------------------------------------------
 	- match original font's size, weight, slant, stretch.
 	- cache the substitutions.
 
-
 LATER ------------------------------------------------------------------------
 
-- p attribute (add a PS for now; makes text more portable too).
-
-- underline / strikethrough:
+- underline / strikethrough (for accelerators and links):
 	- color, thickness, style (single, double, wavy, image), dashes.
+
+- run size/positioning modifiers:
+	- raise: raise, subscript, superscript, sub, sup
+
+- font modifiers:
+	- %size, big, small
+
+- opacity:
+	- apply on the whole run
+		- optimize to only do that if the runs are ligated (how can we know?)
+
+- font_db selector: stretch/condensed...
+
+- p attribute (add a PS for now; makes text more portable too).
 
 - vertical alignment top/bottom margins option:
 	- ascent/descent
 	- spacing_ascent/spacing_descent
 	- paragraph_ascent/paragraph_descent
 
+- html-like markup parser with tags, attributes and escapes.
+	- how is it better than serialized Lua which is syntax-highlighted in code
+	and can be built iteratively without string concatenation?
 
 ADVANCED LAYOUTING -----------------------------------------------------------
 

@@ -194,7 +194,8 @@ local alloc_grapheme_breaks = growbuffer'char[?]'
 
 function tr:shape_text_run(
 	str, str_len, str_offset, len,
-	font, font_size, features, feat_count, rtl, script, lang
+	font, font_size, features, feat_count,
+	rtl, script, lang
 )
 	font:ref()
 	font:setsize(font_size)
@@ -455,7 +456,8 @@ end
 
 --convert a tree of nested text runs into a flat list of runs with properties
 --dynamically inherited from the parent nodes.
---one text run is always created, even when there's no text.
+--NOTE: one text run is always created, even when there's no text, in order
+--to anchor the text properties to a segment and to create a cursor.
 local function flatten_text_tree(parent, runs)
 	for i = 1, math.max(1, #parent) do
 		local run_or_text = parent[i] or ''
@@ -499,10 +501,9 @@ function tr:shape(text_tree)
 
 	local text_runs = flatten_text_tree(text_tree, {})
 
-	--find (font, size) of each text run and get text length in codepoints.
+	--find (font, size) of each text run and get total length in codepoints.
 	local len = 0
 	for _,run in ipairs(text_runs) do
-
 		--find (font, size) of each run.
 		local font_name = run.font_name
 		local weight = (run.bold or run.b) and 'bold' or run.font_weight
@@ -517,7 +518,7 @@ function tr:shape(text_tree)
 		assert(run.font_size, 'Font size missing')
 		run.font_size = snap(run.font_size, self.rs.font_size_resolution)
 
-		--find length in codepoints of each run.
+		--find run's text length in codepoints.
 		run.text_size = run.text_size or #run.text
 		assert(run.text_size, 'text buffer size missing')
 		run.charset = run.charset or 'utf8'
@@ -615,7 +616,7 @@ function tr:shape(text_tree)
 	local level, script, lang
 	if len == 0 then
 		level = dir == 'rtl' and 1 or 0
-		script = text_run.script and hb.script(text_run.script) or hb.C.HB_SCRIPT_COMMON
+		script = hb.script(text_run.script or hb.C.HB_SCRIPT_COMMON)
 		lang = text_run.lang and hb.language(text_run.lang)
 	end
 	for i = 0, len do
@@ -655,38 +656,46 @@ function tr:shape(text_tree)
 		end
 
 		::process::
-		seg_i = seg_i + 1
-		segments[seg_i] = {
-			--reusable part
-			glyph_run = self:glyph_run(
+		do
+			--glyph run: reusable in many segments, cached.
+			local glyph_run = self:glyph_run(
 				str, len, offset, i - offset,
 				text_run.font,
 				text_run.font_size,
 				text_run.features,
 				text_run.feat_count,
 				odd(level), script, lang
-			),
-			--non-reusable part, for layouting
-			bidi_level = level,
-			linebreak = linebreak == 0
-				and (str[i-1] == 0x2029 and 'paragraph' or 'line'),
-			--for cursor positioning
-			text_run = text_run,
-			offset = offset,
-			index = seg_i,
-		}
-		offset = i
+			)
+
+			local linebreak = linebreak == 0
+				and (str[i-1] == 0x2029 and 'paragraph' or 'line')
+
+			seg_i = seg_i + 1
+			segments[seg_i] = {
+				glyph_run = glyph_run,
+				--for line breaking
+				linebreak = linebreak, --hard break
+				--for bidi reordering
+				bidi_level = level,
+				--for cursor positioning
+				text_run = text_run,
+				offset = offset,
+				index = seg_i,
+			}
+			offset = i
+		end
+
+		--if the last segment ended with a hard line break, add another empty
+		--segment at the end, in order to have a cursor on the last empty line.
+		if i == len and linebreak == 0 and len > 0 and isnewline(str[i-1]) then
+			linebreak = 2
+			goto process
+		end
 
 		::advance::
 		text_run, level, script, lang = text_run1, level1, script1, lang1
 	end
 	zone()
-
-	--FIXME: a trailing newline doesn't create a segment and so no cursor either.
-	--FIXME: bidi can result in segments containing only newline characters,
-	--resulting in two overlapping cursors one before newline and one after it!
-	--Since they point to different offsets in the text, they're not treated as
-	--duplicate cursors when navigating the text.
 
 	return segments
 end
@@ -707,13 +716,14 @@ function segments:layout(x, y, w, h, halign, valign)
 		tr = self.tr, segments = self, segmap = {},
 	}, self.tr.lines_class)
 
-	--do line wrapping and compute line width and hlsb.
+	--do line wrapping and compute line width, advance and hlsb.
 	zone'linewrap'
 	local line
 	local ax, dx --line x-advance for line width calculation.
 	local line_i = 0
 	for seg_i, seg in ipairs(self) do
 		local run = seg.glyph_run
+
 		if not line or line.advance_x + dx + run.hlsb + run.w > w then
 			ax = -run.hlsb
 			dx = halign == 'left' and 0 or ax
@@ -727,11 +737,15 @@ function segments:layout(x, y, w, h, halign, valign)
 			line_i = line_i + 1
 			lines[line_i] = line
 		end
+
 		line.w = ax + run.hlsb + run.w
 		line.advance_x = line.advance_x + run.advance_x
 		ax = ax + run.advance_x
+
 		push(line, seg)
+
 		lines.segmap[seg] = line_i --for cursor positioning
+
 		if seg.linebreak then
 			if seg.linebreak == 'paragraph' then
 				--we use this particular segment's paragraph_spacing property
@@ -1052,19 +1066,6 @@ function cursor:next_cursor(delta)
 		end
 	end
 	local offset = self.segments:offset_at_cursor(seg, cursor_i)
-	print(seg,
-		--self.segments.text_len,
-		seg.index,
-		--seg.offset,
-		--seg.glyph_run.text_len,
-		#seg.glyph_run.cursor_offsets,
-		seg.linebreak,
-		--cursor_i,
-		--offset,
-		--offset < self.segments.text_len
-		--and self.segments.codepoints[offset] or 'eof',
-		--self.lines.segmap[seg]
-		'')
 	return offset, seg, cursor_i, delta
 end
 
