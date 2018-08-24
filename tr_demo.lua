@@ -142,26 +142,37 @@ function win:repaint()
 			--{'A'},
 			font_name = 'amiri,80',
 
+			--'abc', 'def', 'ghi',
+
+			--'mff\n12',
+
 			--{'المفاتيح\n'},
-			--{color = '#ff0', 'ال(مف)اتيح ABC\r\n'},
-			--{color = '#f6f', 'A(B)C المفاتيح\u{2029}'},
+			--{color = '#ff0', 'ال(مف)اتيح ,  ABC '},
+			--'\r\n',
+			--{color = '#f6f', 'A(B)C  .  المفاتيح'},
 
-			{
-				line_spacing = 1,
-				font_name = 'eb garamond, 50',
+			--'\u{2029}', --paragraph split
 
-				'abc',
+			--{
+			--line_spacing = 1,
+			--font_name = 'eb garamond, 50',
+
+				{'a'}, {color = '#ff0', 'f'}, {color = '#0ff', 'f'}, {color = '#f0f', 'i'}, {'b'},
+				' abc',
+				--'abc', {'def\n'}, 'ABC 123',
 				--{nowrap = true, 'abc def'}, ' xyz ',
-				--{nowrap = true, '123 456 789'}, ' zyz ',
-				--{nowrap = true, 'ABC DEF GH'},
+				--{nowrap = true, '123 abc 789'}, ' zyz ',
+				--{nowrap = true, 'ABC def GH'},
 
 				--font_name = 'open sans, 200',
+
 				--multiple glyphs with the same cluster value
 				--{'\x15\x09\0\0\x4D\x09\0\0\x15\x09\0\0\x3F\x09\0\0\x15\x09\0\0', charset = 'utf32'},
 				--{'\x15\x09\0\0\x4D\x09\0\0\x15\x09\0\0\x3F\x09\0\0\x15\x09\0\0', charset = 'utf32'},
+
 				--'\u{65}\u{301}ff',
-				--'i fi mTm\n\n\n', {i=1, 'VA', {b=1, 'Dg', {i=false, 'dT\n'}}},
-			},
+				--'i fi mTm\n\n', {i=1, 'VA', {b=1, 'Dg', {i=false, 'dT\n'}}},
+			--},
 
 			--{font_name = 'eb garamond, 100', 'ffix xfl ffi fl\n'},
 			--{font_name = 'amiri, 100', 'ffix xfl ffi fl'},
@@ -177,10 +188,10 @@ function win:repaint()
 			local hit = self.hit_line_i == i
 			local x = x + line.x
 			local y = y + line.y
-			rect(cr, hit and '#f22' or '#222', x + line.hlsb, y, line.w, -line.spacing_ascent)
-			rect(cr, hit and '#f22' or '#022', x + line.hlsb, y, line.w, -line.spacing_descent)
-			rect(cr, hit and '#fff' or '#888', x + line.hlsb, y, line.w, -line.ascent)
-			rect(cr, hit and '#0ff' or '#088', x + line.hlsb, y, line.w, -line.descent)
+			rect(cr, hit and '#f22' or '#222', x, y, line.advance_x, -line.spacing_ascent)
+			rect(cr, hit and '#f22' or '#022', x, y, line.advance_x, -line.spacing_descent)
+			rect(cr, hit and '#fff' or '#888', x, y, line.advance_x, -line.ascent)
+			rect(cr, hit and '#0ff' or '#088', x, y, line.advance_x, -line.descent)
 			dot(cr, '#fff', x, y, 8)
 			dot(cr, '#ff0', x + line.advance_x, y, 8)
 			local ax = x
@@ -188,9 +199,10 @@ function win:repaint()
 			for i,seg in ipairs(line) do
 				local run = seg.glyph_run
 				local hit = hit and self.hit_seg == seg
-				rect(cr, hit and '#f00' or '#555', ax + run.hlsb, ay + run.htsb, run.w, run.h)
-				dot(cr, '#f0f', ax, ay, 6)
-				dot(cr, '#f0f', ax + run.advance_x, ay, 6)
+				--rect(cr, hit and '#f00' or '#555', ax + run.hlsb, ay + run.htsb, run.w, run.h)
+				dot(cr, '#f0f', ax, ay, 5)
+				dot(cr, '#0f0', ax + run.advance_x, ay, 7)
+				--dot(cr, '#fff', ax + run.hlsb, ay + run.htsb, 4)
 				do
 					local ay = ay + (seg.index - 1) * 10
 					if seg.glyph_run.rtl then
@@ -254,12 +266,10 @@ function win:keypress(key)
 
 	end
 
-	if key == 'right' then
-		cursor:move('horiz', 1)
+	if key == 'right' or key == 'left' then
+		cursor:move('horiz', key == 'right' and 1 or -1)
 		self:invalidate()
-	elseif key == 'left' then
-		cursor:move('horiz', -1)
-		self:invalidate()
+		print(cursor.offset, cursor.seg, cursor.cursor_i, pp.format(cursor.seg.glyph_run.cursor_offsets))
 	elseif key == 'up' then
 		cursor:move('vert', -1)
 		self:invalidate()

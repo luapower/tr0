@@ -10,8 +10,6 @@ FEATURES / NOW ---------------------------------------------------------------
 
 - halign: justify.
 
-- nowrap attribute (gsub space with NBSP).
-
 - glyph substitution:
 	- font_override text attribute for manual override.
 	- register fallback fonts for script/language and try them in order.
@@ -91,6 +89,10 @@ allow coloring the diacritical marks differently than the base glyph.
 	- distort points based on path's normal vectors
 	- rasterize new distorted outline
 
+- horizontal alignment and line wrapping which excludes side bearings.
+	- diff. for RTL and LTR lines and doesn't "just work" for mixed lines
+	because bidi reordering happens after line breaking so it's not known
+	which segments will be first/last when doing line wrapping.
 
 EDITING ----------------------------------------------------------------------
 
