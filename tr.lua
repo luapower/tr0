@@ -747,7 +747,7 @@ function tr:shape(text_tree)
 				local last_sub_len = seg_len - sub_offset
 				local sub_offset = 0
 				local glyph_i = 0
-				local clipping_left = false
+				local clip_left = 0
 				for i = 1, substack_n + 1, 2 do
 					local sub_len, sub_text_run
 					if i < substack_n  then
@@ -787,20 +787,21 @@ function tr:shape(text_tree)
 						and glyph_run.info[last_glyph_i+1].cluster
 						or seg_len
 
-					local clipping_right = next_cluster > next_sub_offset
-					if clipping_right then
-						clipping_right = glyph_run.cursor_xs[cursor_i]
-					end
+					local clip_right = next_cluster > next_sub_offset
+					clip_right = clip_right and glyph_run.cursor_xs[cursor_i] or 0
+
+					--print(last_glyph_i, clip_right)
+					--print(clip_left, clip_right)
 
 					push(segment, glyph_i)
 					push(segment, last_glyph_i)
 					push(segment, sub_text_run)
-					push(segment, clipping_left)
-					push(segment, clipping_right)
+					push(segment, clip_left)
+					push(segment, clip_right)
 
 					sub_offset = next_sub_offset
-					glyph_i = last_glyph_i + (clipping_right and 0 or 1)
-					clipping_left = clipping_right
+					glyph_i = last_glyph_i + (clip_right ~= 0 and 0 or 1)
+					clip_left = clip_right
 				end
 				substack_n = 0 --empty the stack
 			end
@@ -1004,19 +1005,38 @@ tr.lines_class = lines
 
 tr.default_color = '#fff'
 
-function lines:paint_glyph_run(cr, rs, run, i, j, ax, ay, color, clip_left, clip_right)
+function lines:paint_glyph_run(cr, rs, run, i1, i2, ax, ay, color, clip_left, clip_right)
 	rs:setcolor(cr, color)
-
-	--if clip_left or clip_right then
-
-	for i = i, j do
+	for i = i1, i2 do
 		local glyph_index = run.info[i].codepoint
 		local px, py = run:glyph_pos(i)
 		local glyph, bmpx, bmpy = rs:glyph(
 			run.font, run.font_size, glyph_index,
 			ax + px, ay + py
 		)
-		rs:paint_glyph(cr, glyph, bmpx, bmpy)
+		if (clip_left ~= 0 and i == i1) or (clip_right ~= 0 and i == i2) then
+			local x = bmpx
+			local y = bmpy
+			local w = glyph.bitmap.width
+			local h = glyph.bitmap.rows
+			if clip_left ~= 0 then
+				local dx = clip_left + ax - bmpx
+				x = x + dx
+				w = w - dx
+			end
+			if clip_right ~= 0 then
+				local dx = clip_right + ax - bmpx - w
+				w = w - dx
+			end
+			cr:save()
+			cr:new_path()
+			cr:rectangle(x, y, w, h)
+			cr:clip()
+			rs:paint_glyph(cr, glyph, bmpx, bmpy)
+			cr:restore()
+		else
+			rs:paint_glyph(cr, glyph, bmpx, bmpy)
+		end
 	end
 end
 
@@ -1039,7 +1059,7 @@ function lines:paint(cr)
 				end
 			else
 				local color = seg.text_run.color or default_color
-				self:paint_glyph_run(cr, rs, run, 0, run.len-1, ax, ay, color)
+				self:paint_glyph_run(cr, rs, run, 0, run.len-1, ax, ay, color, 0, 0)
 			end
 
 			ax = ax + run.advance_x
