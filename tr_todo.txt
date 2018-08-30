@@ -2,13 +2,47 @@ RESEARCH ---------------------------------------------------------------------
 
 - how does harfbuzz select charmap?
 
+
 FEATURES / NOW ---------------------------------------------------------------
+
+- BUG: line wrapping: remove last logical space of last word on the line.
+
+- BUG/RTL: sub-segments don't work on RTL runs.
+
+- BUG: segment.text_run is that of last sub-segment: sometimes this is a bad
+	choice eg. with `nowrap` on {nowrap=true, 'a b'},' c' which creates
+	segments 'a ','b ','c' but sub-segments 'a','b',' ','c'
+	where ' ' has nowrap=false.
+	- same problem with selecting `paragraph_spacing`
+	- need a way to distribute enclosing attributes like `p` to text_runs.
 
 - lines:relayout(w, h, valign, halign)
 
 - follow tabstops (for codedit)
 
-- halign: justify.
+- halign: justify:
+	- distribute whitespace uniformly, including cursor positions.
+
+
+LATER ------------------------------------------------------------------------
+
+- underline / strikethrough (for accelerators and links):
+	- color, thickness, style (single, double, wavy, image), dashes.
+
+- font baseline modifiers:
+	- raise, subscript, superscript, sub, sup
+
+- font size modifiers:
+	- %size, big, small
+
+- font_db selector: stretch/condensed...
+
+- p attribute.
+	- for now: use PS (makes text more portable too).
+
+- text_run.dir attribute which also splits a segment.
+	- for now: enclose text in LRI/PDF or RLI/PDF.
+		- downside: unlike markup, bidi markers don't cross paragraph boundaries.
 
 - glyph substitution:
 	- font_override text attribute for manual override.
@@ -16,24 +50,12 @@ FEATURES / NOW ---------------------------------------------------------------
 	- match original font's size, weight, slant, stretch.
 	- cache the substitutions.
 
-LATER ------------------------------------------------------------------------
 
-- underline / strikethrough (for accelerators and links):
-	- color, thickness, style (single, double, wavy, image), dashes.
-
-- run size/positioning modifiers:
-	- raise: raise, subscript, superscript, sub, sup
-
-- font modifiers:
-	- %size, big, small
+EVEN LATER -------------------------------------------------------------------
 
 - opacity:
 	- apply on the whole run
-		- optimize to only do that if the runs are ligated (how can we know?)
-
-- font_db selector: stretch/condensed...
-
-- p attribute (add a PS for now; makes text more portable too).
+		- optimize to only do that if the glyphs are ligated (how can we know?)
 
 - vertical alignment top/bottom margins option:
 	- ascent/descent
@@ -44,21 +66,20 @@ LATER ------------------------------------------------------------------------
 	- how is it better than serialized Lua which is syntax-highlighted in code
 	and can be built iteratively without string concatenation?
 
+- font lrucache instead of ref-counting.
+	- use two caches: count-limited mmapped fonts and size-limited heap fonts.
+
+
 ADVANCED LAYOUTING -----------------------------------------------------------
 
 - vertical layouts:
 	- gravity, gravity_hint?
 
-- hb_feature modifiers:
-	- font_variant: normal, smallcaps; smallcaps modifier
-
 - bug: shaping words separately breaks contextual ligatures.
 	- see: https://bugzilla.mozilla.org/show_bug.cgi?id=761442
-	- is that true even if we call harfbuzz with the whole string and an offset?
-
-- allow varying the formatting attributes (color, underline, etc.) within
-a single shaped word, IOW consecutive text runs where only formatting attributes
-are changed between runs should be shaped as a whole to preserve ligatures.
+	- there's talk about a harfbuzz "context" option but I can't see it.
+	- this also disables some advanced features such as word kerning and
+	collision avoidance.
 
 - allow varying the formatting attributes within a single grapheme, IOW
 allow coloring the diacritical marks differently than the base glyph.
@@ -69,6 +90,9 @@ allow coloring the diacritical marks differently than the base glyph.
 - knuth's line wrapping algorithm.
 
 - hyphenation: https://github.com/hunspell/hyphen (what libreoffice uses)
+	- mandatory for word-wrapping of east-asian scripts with no spaces between
+	words (Thai, Lao, Khmer, Burmese, etc.)
+		- word caching would need to be disabled for those scripts as well.
 
 - letter spacing:
 	- identify breaking points (see HB_UNSAFE_TO_BREAK_HERE flag).

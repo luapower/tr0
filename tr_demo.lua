@@ -138,31 +138,46 @@ function win:repaint()
 		{
 			line_spacing = 1.2,
 			paragraph_spacing = 1.5,
-			--dir = 'rtl',
 			--{'A'},
-			font_name = 'amiri,80',
+			font_name = 'amiri,50',
+			--font_name = 'eb garamond, 50',
 
 			--'abc', 'def', 'ghi',
 
 			--'mff\n12',
 
-			--{'المفاتيح\n'},
-			--{color = '#ff0', 'ال(مف)اتيح ,  ABC '},
+			--{font_size = 30, 'We find \u{202B}פעילות הבינאום\u{202C}\u{200E} 5 times.\n'},
+
+			--'פעילות ABC הבינאום',
+			--'ABC DEF \nGHI\n',
+			--'مفاتيح ABC DEF\n',
+			--dir = 'rtl', 'مفاتيح ABC', '\u{2029}', {dir = 'ltr', 'مفاتيح ABC'},
+			--'XXX פעילות ABC הבינאום DEF',
+
+			--dir = 'ltr',
+			--'مفاتيح 123 456 مفاتيح abc',
+			--{'المفاتي','ح\n'},
+			--{color = '#ff0', 'ال  ( مف ) اتيح', font_size = 81},
 			--'\r\n',
-			--{color = '#f6f', 'A(B)C  .  المفاتيح'},
+			--{color = '#f6f', '  A(B)C  .  المفاتيح  '},
 
 			--'\u{2029}', --paragraph split
 
 			--{
 			--line_spacing = 1,
-			--font_name = 'eb garamond, 50',
 
-				{'a'}, {color = '#ff0', 'f'}, {color = '#0ff', 'f'}, {color = '#f0f', 'i'}, {'b'},
-				' abc',
+				--'abc    def       ghi   123   xxx',
+
+				features = 'smcp liga=1 +kern',
+
+				--{'f'},{color = '#ff0','f'},{'i'},
+				{'Td'}, {color = '#ff0', 'f'}, {color = '#0ff', 'f'}, {color = '#f0f', 'i'}, {'b\n'}, 'abc def ghi',
+				--' abc',
 				--'abc', {'def\n'}, 'ABC 123',
-				--{nowrap = true, 'abc def'}, ' xyz ',
-				--{nowrap = true, '123 abc 789'}, ' zyz ',
-				--{nowrap = true, 'ABC def GH'},
+				--t=0,
+				--{t=1, nowrap = true, 'abc def'}, ' xyz ',
+				--{t=2, nowrap = true, '12 abc 789'}, ' zyz', {x = 20, y = -30, font_size = 40, '2'},
+				--{t=3, nowrap = true, 'ABC def GH'},
 
 				--font_name = 'open sans, 200',
 
@@ -192,31 +207,32 @@ function win:repaint()
 			rect(cr, hit and '#f22' or '#022', x, y, line.advance_x, -line.spacing_descent)
 			rect(cr, hit and '#fff' or '#888', x, y, line.advance_x, -line.ascent)
 			rect(cr, hit and '#0ff' or '#088', x, y, line.advance_x, -line.descent)
-			dot(cr, '#fff', x, y, 8)
-			dot(cr, '#ff0', x + line.advance_x, y, 8)
+			dot(cr, '#fff', x, y, 6)
+			dot(cr, '#ff0', x + line.advance_x, y, 6)
 			local ax = x
 			local ay = y
 			for i,seg in ipairs(line) do
 				local run = seg.glyph_run
 				local hit = hit and self.hit_seg == seg
 				--rect(cr, hit and '#f00' or '#555', ax + run.hlsb, ay + run.htsb, run.w, run.h)
-				dot(cr, '#f0f', ax, ay, 5)
-				dot(cr, '#0f0', ax + run.advance_x, ay, 7)
+				dot(cr, '#f0f', ax, ay, 4)
+				dot(cr, '#0f0', ax + seg.advance_x, ay, 5)
 				--dot(cr, '#fff', ax + run.hlsb, ay + run.htsb, 4)
 				do
 					local ay = ay + (seg.index - 1) * 10
-					if seg.glyph_run.rtl then
-						vector(cr, '#f00', ax + run.advance_x, ay, ax, ay + 10)
+					if run.rtl then
+						vector(cr, '#f00', ax + seg.advance_x, ay, ax, ay + 10)
 					else
-						vector(cr, '#66f', ax, ay, ax + run.advance_x, ay + 10)
+						vector(cr, '#66f', ax, ay, ax + seg.advance_x, ay + 10)
 					end
 				end
-				for i,cx in ipairs(run.cursor_xs) do
+				for i = 0, run.text_len do
+					local cx = run.cursor_xs[i]
 					local px = ax + cx
 					local hit = hit and self.hit_cursor_i == i
-					dot(cr, '#0ff', px, ay, 3)
+					dot(cr, '#0ff', px, ay, 2)
 				end
-				ax = ax + run.advance_x
+				ax = ax + seg.advance_x
 			end
 		end
 
@@ -269,7 +285,8 @@ function win:keypress(key)
 	if key == 'right' or key == 'left' then
 		cursor:move('horiz', key == 'right' and 1 or -1)
 		self:invalidate()
-		print(cursor.offset, cursor.seg, cursor.cursor_i, pp.format(cursor.seg.glyph_run.cursor_offsets))
+		print(cursor.offset, cursor.seg, cursor.cursor_i,
+			pp.format(cursor.seg.glyph_run.cursor_offsets))
 	elseif key == 'up' then
 		cursor:move('vert', -1)
 		self:invalidate()
