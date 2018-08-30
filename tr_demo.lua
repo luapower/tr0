@@ -150,11 +150,14 @@ function win:repaint()
 
 			--'פעילות ABC הבינאום',
 			--'ABC DEF \nGHI\n',
+
 			--'مفاتيح ABC DEF\n',
+			dir = 'rtl',
+			'ABC DEF مفاتيح مفاتيح',
+
 			--dir = 'rtl', 'مفاتيح ABC', '\u{2029}', {dir = 'ltr', 'مفاتيح ABC'},
 			--'XXX פעילות ABC הבינאום DEF',
 
-			--dir = 'ltr',
 			--'مفاتيح 123 456 مفاتيح abc',
 			--{'المفاتي','ح\n'},
 			--{color = '#ff0', 'ال  ( مف ) اتيح', font_size = 81},
@@ -171,7 +174,8 @@ function win:repaint()
 				features = 'smcp liga=1 +kern',
 
 				--{'f'},{color = '#ff0','f'},{'i'},
-				{'Td'}, {color = '#ff0', 'f'}, {color = '#0ff', 'f'}, {color = '#f0f', 'i'}, {'b\n'}, 'abc def ghi',
+				--'Td', 'fb\n',
+				--{'Td'}, {color = '#ff0', 'f'}, {color = '#0ff', 'f'}, {color = '#f0f', 'i'}, {'b\n'}, 'abc def ghi',
 				--' abc',
 				--'abc', {'def\n'}, 'ABC 123',
 				--t=0,
@@ -227,7 +231,7 @@ function win:repaint()
 					end
 				end
 				for i = 0, run.text_len do
-					local cx = run.cursor_xs[i]
+					local cx = seg.offset_x + run.cursor_xs[i]
 					local px = ax + cx
 					local hit = hit and self.hit_cursor_i == i
 					dot(cr, '#0ff', px, ay, 2)
@@ -285,8 +289,12 @@ function win:keypress(key)
 	if key == 'right' or key == 'left' then
 		cursor:move('horiz', key == 'right' and 1 or -1)
 		self:invalidate()
+		local t = {}
+		for i = 0, cursor.seg.glyph_run.len do
+			t[#t+1] = cursor.seg.glyph_run.cursor_xs[i]
+		end
 		print(cursor.offset, cursor.seg, cursor.cursor_i,
-			pp.format(cursor.seg.glyph_run.cursor_offsets))
+			cursor.seg.glyph_run.cursor_xs[cursor.cursor_i], pp.format(t))
 	elseif key == 'up' then
 		cursor:move('vert', -1)
 		self:invalidate()

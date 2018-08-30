@@ -169,16 +169,6 @@ function glyph_run:check_offset(i, wrapped)
 	return i
 end
 
-local function pos_x(pos, i)
-	return i > 0 and pos[i-1].x_advance / 64 or 0
-end
-
-local function ofs_xy(pos, i)
-	return
-		pos[i].x_offset / 64,
-		pos[i].y_offset / 64
-end
-
 --[[
 --not yet used.
 function glyph_run:glyph_metrics(i)
@@ -217,8 +207,8 @@ local hb_glyph_size =
 local function isnewline(c)
 	return c == 10 or c == 13 or c == PS or c == LS
 		or c == 0x85 --NEL
-		or c == 0x0B --Vertical Tab
-		or c == 0x0C --Form Feed
+		or c == 0x0B --VT (Vertical Tab)
+		or c == 0x0C --FF (Form Feed)
 end
 
 --for harfbuzz, language is a ISO-639 language code + country code,
@@ -288,7 +278,7 @@ function tr:shape_text_run(
 	local glyph_pos   = hb_buf:get_glyph_positions()
 
 	--make the advance of each glyph relative to the start of the run
-	--so that pos_x(glyph_pos, i) can be computed in O(1) for any index.
+	--so that pos_x() is O(1) for any index.
 	--also compute the run's total advance.
 	local ax = 0
 	for i = 0, glyph_count-1 do
@@ -296,6 +286,12 @@ function tr:shape_text_run(
 		glyph_pos[i].x_advance = ax
 	end
 	ax = ax / 64
+
+	local function pos_x(i)
+		assert(i >= 0)
+		assert(i <= glyph_count)
+		return i > 0 and glyph_pos[i-1].x_advance / 64 or 0
+	end
 
 	zone()
 
@@ -310,7 +306,7 @@ function tr:shape_text_run(
 	local grapheme_breaks --allocated on demand for multi-codepoint clusters
 
 	local function add_cursors(
-		glyph_offset, glyph_count,
+		glyph_offset, glyph_len,
 		cluster, cluster_len, cluster_x
 	)
 		cursor_offsets[cluster] = cluster
@@ -331,9 +327,9 @@ function tr:shape_text_run(
 				--result of forming ligatures, which the font can provide carets
 				--for. missing ligature carets, we divide the combined x-advance
 				--of the glyphs evenly between graphemes.
-				for i = glyph_offset, glyph_offset + glyph_count - 1 do
+				for i = glyph_offset, glyph_offset + glyph_len - 1 do
 					local glyph_index = glyph_info[i].codepoint
-					local cluster_x = pos_x(glyph_pos, i)
+					local cluster_x = pos_x(i)
 					local carets, caret_count =
 						font.hb_font:get_ligature_carets(hb_dir, glyph_index)
 					if caret_count > 0 then
@@ -354,9 +350,8 @@ function tr:shape_text_run(
 						--font doesn't provide carets: add synthetic carets by
 						--dividing the total x-advance of the remaining glyphs
 						--evenly between remaining graphemes.
-						local next_glyph_index = glyph_offset + glyph_count
-						local total_advance_x =
-							pos_x(glyph_pos, next_glyph_index) - pos_x(glyph_pos, i)
+						local next_i = glyph_offset + glyph_len
+						local total_advance_x = pos_x(next_i) - pos_x(i)
 						local w = total_advance_x / grapheme_count
 						for i = 1, grapheme_count-1 do
 							--create a synthetic cluster at each grapheme boundary.
@@ -380,9 +375,9 @@ function tr:shape_text_run(
 		local c, cn, cx --cluster, cluster len, cluster x.
 		c = len
 		cursor_offsets[c] = c
-		cursor_xs[c] = ax
+		cursor_xs[c] = 0
 		for i1, n1, c1 in rle_runs(glyph_info, glyph_count, get_cluster) do
-			cx = pos_x(glyph_pos, i1)
+			cx = pos_x(i1)
 			if i then
 				add_cursors(i, n, c, cn, cx)
 			end
@@ -400,7 +395,7 @@ function tr:shape_text_run(
 				local cn = c1 - c
 				add_cursors(i, n, c, cn, cx)
 			end
-			local cx1 = pos_x(glyph_pos, i1)
+			local cx1 = pos_x(i1)
 			i, n, c, cx = i1, n1, c1, cx1
 		end
 		if i then
@@ -432,7 +427,7 @@ function tr:shape_text_run(
 	if trailing_space then
 		local i = rtl and 0 or glyph_count-1
 		assert(glyph_info[i].cluster == len-1)
-		wx = wx - (pos_x(glyph_pos, i+1) - pos_x(glyph_pos, i))
+		wx = wx - (pos_x(i+1) - pos_x(i))
 	end
 
 	local glyph_run = update({
@@ -622,6 +617,9 @@ function tr:shape(text_tree)
 		offset = offset + run.len
 	end
 
+	text_runs.codepoints = str --anchor it (for editing)
+	text_runs.len = len --for bounds checking
+
 	--detect the script property for each char of the entire text.
 	local scripts = alloc_scripts(len)
 	local langs = alloc_langs(len)
@@ -665,68 +663,73 @@ function tr:shape(text_tree)
 	local bracket_types = alloc_bracket_types(len)
 	local levels        = alloc_levels(len)
 
-	local text_run_index = 1
-	local text_run = text_runs[1]
+	local text_run_index = 0
+	local next_i = 0 --char offset of the next text run
 	local par_offset = 0
-	local dir = text_run.dir --paragraph's base direction
-	local reorder_segments --request bidi line reordering
+	local dir --last char's paragraph's base direction
+	local reorder_segments --bidi reordering will be needed on line-wrapping.
 
-	for i = 0, len do
+	for i = 0, len do --NOTE: going one char beyond the text!
 
-		local text_run1, dir1
+		--per-text-run attrs for the current char.
+		local dir1 = dir
 
-		if i < len then
-			--change to the next text_run if we're past the current text run.
-			--NOTE: the paragraph `dir` is that of the last text run which sets it.
-			if i > text_run.offset + text_run.len - 1 then
-				text_run_index = text_run_index + 1
-				text_run1 = text_runs[text_run_index]
-				dir1 = text_run1.dir or dir
-			else
-				text_run1 = text_run
-				dir1 = dir
-			end
+		--change to the next text run if we're past the current text run.
+		--NOTE: the paragraph `dir` is that of the last text run which sets it.
+		--NOTE: this runs when i == 0 and when len == 0 but not when i == len.
+		if i == next_i then
+			text_run_index = text_run_index + 1
+			local t = text_runs[text_run_index]
+
+			dir1 = t.dir or dir
+
+			next_i = t.offset + t.len
+			next_i = next_i < len and next_i
 		end
 
 		if i == len or (i > 0 and str[i-1] == PS) then
 
 			local par_len = i - par_offset
 
-			local dir = (dir or 'auto'):lower()
-			local fb_dir =
-					dir == 'rtl'  and fb.C.FRIBIDI_PAR_RTL
-				or dir == 'ltr'  and fb.C.FRIBIDI_PAR_LTR
-				or dir == 'auto' and fb.C.FRIBIDI_PAR_ON
+			if par_len > 0 then
 
-			fb.bidi_types(
-				str + par_offset,
-				par_len,
-				bidi_types + par_offset
-			)
+				local dir = (dir or 'auto'):lower()
+				local fb_dir =
+						dir == 'rtl'  and fb.C.FRIBIDI_PAR_RTL
+					or dir == 'ltr'  and fb.C.FRIBIDI_PAR_LTR
+					or dir == 'auto' and fb.C.FRIBIDI_PAR_ON
 
-			fb.bracket_types(
-				str + par_offset,
-				par_len,
-				bidi_types + par_offset,
-				bracket_types + par_offset
-			)
+				fb.bidi_types(
+					str + par_offset,
+					par_len,
+					bidi_types + par_offset
+				)
 
-			local max_bidi_level, fb_dir = fb.par_embedding_levels(
-				bidi_types + par_offset,
-				bracket_types + par_offset,
-				par_len,
-				fb_dir,
-				levels + par_offset
-			)
-			assert(max_bidi_level)
+				fb.bracket_types(
+					str + par_offset,
+					par_len,
+					bidi_types + par_offset,
+					bracket_types + par_offset
+				)
 
-			reorder_segments = reorder_segments
-				or max_bidi_level > (dir == 'rtl' and 1 or 0)
+				local max_bidi_level, fb_dir = fb.par_embedding_levels(
+					bidi_types + par_offset,
+					bracket_types + par_offset,
+					par_len,
+					fb_dir,
+					levels + par_offset
+				)
+				assert(max_bidi_level)
+
+				reorder_segments = reorder_segments
+					or max_bidi_level > (dir == 'rtl' and 1 or 0)
+
+			end
 
 			par_offset = i
 		end
 
-		text_run, dir = text_run1, dir1
+		dir = dir1
 	end
 	zone()
 
@@ -748,26 +751,12 @@ function tr:shape(text_tree)
 
 	local segments = update({tr = self}, self.segments_class) --{seg1, ...}
 
-	segments.codepoints = str --anchor it (for editing)
-	segments.len = len --for bounds checking
 	segments.reorder = reorder_segments --for optimization
 
-	local text_run_index = 1
-	local text_run = text_runs[1]
-
-	local font = text_run.font
-	local font_size = text_run.font_size
-	local features = text_run.features
-	local feat_count = text_run.feat_count
-
-	local level, script, lang
-
-	if len == 0 then
-		local dir = (text_tree.dir or 'auto'):lower()
-		level = dir == 'rtl' and 1 or 0
-		script = hb.script(text_run.script or hb.C.HB_SCRIPT_COMMON)
-		lang = text_run.lang and hb.language(text_run.lang)
-	end
+	local text_run_index = 0
+	local next_i = 0 --char offset of the next text run
+	local text_run, font, font_size, features, feat_count --per-text-run attrs
+	local level, script, lang --per-char attrs
 
 	local seg_offset = 0 --curent segment's offset in text
 	local sub_offset = 0 --current sub-segment's relative text offset
@@ -775,28 +764,48 @@ function tr:shape(text_tree)
 	local substack = {}
 	local substack_n = 0
 
-	for i = 0, len do --NOTE: the last iteration is outside the text!
+	for i = 0, len do --NOTE: going one char beyond the text!
 
+		--per-text-run attts for the current char.
 		local text_run1, font1, font_size1, features1, feat_count1
+
+		--change to the next text run if we're past the current text run.
+		--NOTE: this runs when i == 0 and when len == 0 but not when i == len.
+		if i == next_i then
+
+			text_run_index = text_run_index + 1
+
+			text_run1 = text_runs[text_run_index]
+			font1 = text_run1.font
+			font_size1 = text_run1.font_size
+			features1 = text_run1.features
+			feat_count1 = text_run1.feat_count
+
+			next_i = text_run1.offset + text_run1.len
+			next_i = next_i < len and next_i
+
+		elseif i < len then
+
+			--use last char's attrs.
+			text_run1 = text_run
+			font1 = font
+			font_size1 = font_size
+			features1 = features
+			feat_count1 = feat_count
+
+		end
+
+		--per-char attrs for the current char.
 		local level1, script1, lang1
+		if len == 0 then
 
-		if i < len then
+			--the string is empty so init those with defaults.
+			local dir = (text_run1.dir or 'auto'):lower()
+			level1 = dir == 'rtl' and 1 or 0
+			script1 = hb.script(text_run1.script or hb.C.HB_SCRIPT_COMMON)
+			lang1 = text_run1.lang and hb.language(text_run1.lang)
 
-			--change to the next text_run if we're past the current text run.
-			if i > text_run.offset + text_run.len - 1 then
-				text_run_index = text_run_index + 1
-				text_run1 = text_runs[text_run_index]
-				font1 = text_run1.font
-				font_size1 = text_run1.font_size
-				features1 = text_run1.features
-				feat_count1 = text_run1.feat_count
-			else
-				text_run1 = text_run
-				font1 = font
-				font_size1 = font_size
-				features1 = features
-				feat_count1 = feat_count
-			end
+		elseif i < len then
 
 			level1 = levels[i]
 			script1 = scripts[i]
@@ -804,35 +813,42 @@ function tr:shape(text_tree)
 
 		end
 
-		local new_segment, new_subsegment
-		local linebreak_code --0: required, 1: allowed, 2: not allowed.
+		--init last char's state on first iteration. this works both to prevent
+		--making a first empty segment and to provide state for when len == 0.
+		if i == 0 then
 
-		if len == 0 then
+			text_run = text_run1
+			font = font1
+			font_size = font_size1
+			features = features1
+			feat_count = feat_count1
 
-			new_segment = true
-			new_subsegment = true
-			linebreak_code = 2
+			level = level1
+			script = script1
+			lang = lang1
 
-		elseif i > 0 then --NOTE: this branch includes i == len.
-
-			linebreak_code = linebreaks[i-1]
-
-			--check if any attributes that require a new segment have changed.
-			new_segment =
-				linebreak_code < 2
-				or font1 ~= font
-				or font_size1 ~= font_size
-				or features1 ~= features
-				or level1 ~= level
-				or script1 ~= script
-				or lang1 ~= lang
-
-			--check if any attributes that require a new sub-segment have changed.
-			new_subsegment =
-				new_segment
-				or text_run1 ~= text_run
-
+			if len == 0 then
+				font1 = nil --force making a new segment
+			end
 		end
+
+		--unicode line breaking: 0: required, 1: allowed, 2: not allowed.
+		local linebreak_code = i > 0 and linebreaks[i-1] or 2
+
+		--check if any attributes that require a new segment have changed.
+		local new_segment =
+			linebreak_code < 2
+			or font1 ~= font
+			or font_size1 ~= font_size
+			or features1 ~= features
+			or level1 ~= level
+			or script1 ~= script
+			or lang1 ~= lang
+
+		--check if any attributes that require a new sub-segment have changed.
+		local new_subsegment =
+			new_segment
+			or text_run1 ~= text_run
 
 		if new_segment then
 
@@ -841,24 +857,23 @@ function tr:shape(text_tree)
 			local seg_len = i - seg_offset
 			local rtl = odd(level)
 
-			--find the segment length without trailing linebreaks.
-			local cur_len = seg_len
-			for i = seg_offset + cur_len-1, seg_offset, -1 do
+			--find the segment length without trailing linebreak chars.
+			--NOTE: this can result in seg_len == 0, which is still valid.
+			for i = seg_offset + seg_len-1, seg_offset, -1 do
 				if isnewline(str[i]) then
-					cur_len = cur_len - 1
+					seg_len = seg_len - 1
 				else
 					break
 				end
 			end
 
-			--find if the segment has a trailing space character.
-			local trailing_space = cur_len > 0
-				and fb.IS_EXPLICIT_OR_BN_OR_WS(bidi_types[seg_offset + cur_len-1])
+			--find if the segment has a trailing space char.
+			local trailing_space = seg_len > 0
+				and fb.IS_EXPLICIT_OR_BN_OR_WS(bidi_types[seg_offset + seg_len-1])
 
-			--shape the segment excluding trailing whitespace or linebreaks.
-			--NOTE: this can result in an zero-glyph run, which is valid.
+			--shape the segment excluding trailing linebreak chars.
 			local glyph_run = self:glyph_run(
-				str, seg_offset, cur_len, trailing_space,
+				str, seg_offset, seg_len, trailing_space,
 				font, font_size, features, feat_count,
 				rtl, script, lang
 			)
@@ -880,6 +895,7 @@ function tr:shape(text_tree)
 				index = seg_i,
 				--table slots filled by layouting
 				advance_x = false,
+				offset_x = false,
 				line_index = false,
 				wrapped = false, --ignore trailing space
 			}
@@ -902,6 +918,8 @@ function tr:shape(text_tree)
 
 					--adjust `next_sub_offset` to a grapheme position.
 					local next_sub_offset = sub_offset + sub_len
+					assert(next_sub_offset >= 0)
+					assert(next_sub_offset <= seg_len)
 					local next_sub_offset = glyph_run.cursor_offsets[next_sub_offset]
 					local sub_len = next_sub_offset - sub_offset
 
@@ -999,10 +1017,16 @@ function tr:shape(text_tree)
 			sub_offset = sub_offset + sub_len
 		end
 
-		text_run, font, font_size, features, feat_count =
-			text_run1, font1, font_size1, features1, feat_count1
+		--update last char state with current char state.
+		text_run = text_run1
+		font = font1
+		font_size = font_size1
+		features = features1
+		feat_count = feat_count1
 
-		level, script, lang = level1, script1, lang1
+		level = level1
+		script = script1
+		lang = lang1
 	end
 	zone()
 
@@ -1071,6 +1095,8 @@ function segments:layout(x, y, w, h, halign, valign)
 				local last_run = last_seg.glyph_run
 				line.advance_x = line.advance_x - last_seg.advance_x
 				last_seg.advance_x = last_run.wrap_advance_x
+				last_seg.offset_x = last_run.rtl
+					and -(last_run.advance_x - last_run.wrap_advance_x) or 0
 				last_seg.wrapped = true
 				line.advance_x = line.advance_x + last_seg.advance_x
 			end
@@ -1091,6 +1117,7 @@ function segments:layout(x, y, w, h, halign, valign)
 			local seg = self[i]
 			local run = seg.glyph_run
 			seg.advance_x = run.advance_x
+			seg.offset_x = 0
 			seg.line_index = line_i
 			push(line, seg)
 		end
@@ -1211,14 +1238,18 @@ tr.default_color = '#fff'
 function lines:paint_glyph_run(cr, rs, run, i, j, ax, ay, color, clip_left, clip_right)
 	rs:setcolor(cr, color)
 	for i = i, j do
+
 		local glyph_index = run.info[i].codepoint
-		local px = pos_x(run.pos, i)
-		local ox, oy = ofs_xy(run.pos, i)
+		local px = i > 0 and run.pos[i-1].x_advance / 64 or 0
+		local ox = run.pos[i].x_offset / 64
+		local oy = run.pos[i].y_offset / 64
+
 		local glyph, bmpx, bmpy = rs:glyph(
 			run.font, run.font_size, glyph_index,
 			ax + px + ox,
 			ay - oy
 		)
+
 		if clip_left or clip_right then
 			local x = bmpx
 			local y = bmpy
@@ -1255,20 +1286,21 @@ function lines:paint(cr)
 		local ay = self.y + self.baseline + line.y
 
 		for _,seg in ipairs(line) do
+
 			local run = seg.glyph_run
-			local si, sj = run:glyph_range(seg.wrapped)
+			local x, y = ax + seg.offset_x, ay
+
 			if #seg > 0 then --has sub-segments, paint them separately
 				for i = 1, #seg, 5 do
 					local i, j, text_run, clip_left, clip_right = unpack(seg, i, i + 4)
-					i = math.max(i, si)
-					j = math.min(j, sj)
 					local color = text_run.color or default_color
-					self:paint_glyph_run(cr, rs, run, i, j, ax, ay, color, clip_left, clip_right)
+					self:paint_glyph_run(cr, rs, run, i, j, x, y, color, clip_left, clip_right)
 				end
 			else
 				local color = seg.text_run.color or default_color
-				self:paint_glyph_run(cr, rs, run, si, sj, ax, ay, color)
+				self:paint_glyph_run(cr, rs, run, 0, run.len-1, x, y, color)
 			end
+
 			ax = ax + seg.advance_x
 		end
 	end
@@ -1291,8 +1323,8 @@ function segments:cursor_at_offset(offset)
 	local seg_i = (binsearch(offset, self, cmp_offsets) or #self + 1) - 1
 	local seg = self[seg_i]
 	local run = seg.glyph_run
-	local i = run:check_offset(offset - seg.offset)
-	return seg, run.cursor_offsets[i]
+	local rel_offset = run:check_offset(offset - seg.offset)
+	return seg, run.cursor_offsets[rel_offset]
 end
 
 function segments:offset_at_cursor(seg, i)
@@ -1359,7 +1391,7 @@ function lines:hit_test_cursors(line_i, x, extend_left, extend_right)
 			--find the cursor position closest to x.
 			local min_d, cursor_i = 1/0
 			for i = 0, run.text_len do
-				local d = math.abs(seg.glyph_run.cursor_xs[i] - x)
+				local d = math.abs(seg.offset_x + seg.glyph_run.cursor_xs[i] - x)
 				if d < min_d then
 					min_d, cursor_i = d, i
 				end
@@ -1394,7 +1426,7 @@ function lines:cursor_pos(seg, cursor_i)
 		local run = seg.glyph_run
 		if seg == target_seg then
 			return
-				ax + run.cursor_xs[cursor_i],
+				ax + seg.offset_x + run.cursor_xs[cursor_i],
 				ay - line.ascent,
 				line.ascent - line.descent, --cursor height
 				seg.glyph_run.rtl --cursor direction
