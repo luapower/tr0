@@ -83,18 +83,18 @@ in the hierarchy.
 
 Attributes can be:
 
-  * `font_name`: font name in the format `'family [weight] [slant][, size]'
+  * `font_name`: font name in the format `'family [weight] [slant][, size]'`
   (parsed by `tr_font_db.lua`).
   * `font_size`: font size override.
   * `font_weight`: font weight override: `'bold'`, `'thin'` etc. or a weight
-  number between 100 and 900.
+  number between `100` and `900`.
   * `font_slant`: font slant override: `'italic'`, `'normal'`.
   * `bold`, `b`, `italic`, `i`: `font_weight` and `font_slant` overrides.
   * `features`: a list of OpenType features in string form:
   `feat1 +feat2 -feat3 feat4=1`
-  * `script`: an ISO-15924 script tag (the default is auto-detected based on
+  * `script`: an [ISO-15924] script tag (the default is auto-detected based on
   Unicode General Category classes, see the `tr_shape_script.lua`).
-  * `lang`: an ISO-639 language-country code (the default is auto-detected
+  * `lang`: an [BCP-47] language-country code (the default is auto-detected
   from the script property, see `tr_shape_lang.lua`).
   * `dir`: `'ltr'`, `'rtl'`, `'auto'`: bidi direction for current and
   subsequent paragraphs.
@@ -102,6 +102,10 @@ Attributes can be:
   * `paragraph_spacing`: paragraph spacing multiplication factor (defaults to `2`).
   * `nowrap`: disable word wrapping.
   * `color`: a color parsed by the [color] module (`#rrggbb`, etc.).
+
+[ISO-15924]: https://www.unicode.org/iso15924/iso15924-codes.html
+
+[BCP-47]: https://www.iana.org/assignments/language-subtag-registry/language-subtag-registry
 
 NOTE: one text run is always created for each source table, even when there's
 no text, in order to anchor the attrs to a segment and to create a cursor.
@@ -144,3 +148,4 @@ that.
 ### `tr:textbox(text_tree, cr, x, y, w, h, [halign], [valign]) -> segments`
 
 Shape, layout and paint text. Return segments.
+
