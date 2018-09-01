@@ -32,9 +32,8 @@ local trim = glue.trim
 local bounding_box = box2d.bounding_box
 local hit_box = box2d.hit
 local odd = function(x) return band(x, 1) == 1 end
-
-local PS = fb.C.FRIBIDI_CHAR_PS --Paragraph Separator
-local LS = fb.C.FRIBIDI_CHAR_LS --Line Separator
+local PS = fb.C.FRIBIDI_CHAR_PS --paragraph separator codepoint
+local LS = fb.C.FRIBIDI_CHAR_LS --line separator codepoint
 
 --iterate a list of values in run-length encoded form.
 local function index_it(t, i) return t[i] end
@@ -63,10 +62,6 @@ end
 
 local tr = {}
 setmetatable(tr, tr)
-
---export these for use in text trees as paragraph and line separators.
-tr.PS = '\u{2029}'
-tr.LS = '\u{2028}'
 
 tr.glyph_run_cache_size = 1024^2 * 10 --10MB net (arbitrary default)
 
@@ -99,6 +94,31 @@ function tr:free()
 	self.rs:free()
 	self.rs = false
 end
+
+--text snippets to use in text trees -----------------------------------------
+
+--paragraph and line separators.
+tr.PS = '\u{2029}' --paragraph separator
+tr.LS = '\u{2028}' --line separator
+
+--for use in bidi text.
+tr.LRM = '\u{200E}' --LTR mark
+tr.RLM = '\u{200F}' --RTL mark
+tr.LRE = '\u{202A}' --embedding
+tr.RLE = '\u{202B}' --embedding
+tr.PDF = '\u{202C}' --close LRE or RLE
+tr.LRO = '\u{202D}' --override
+tr.RLO = '\u{202E}' --override
+tr.LRI = '\u{2066}' --isolate
+tr.RLI = '\u{2067}' --isolate
+tr.FSI = '\u{2068}'
+tr.PDI = '\u{2069}' --close RLI, LRI, FSI
+
+--line wrapping control.
+tr.NBSP   = '\u{00A0}' --non-breaking space
+tr.ZWSP   = '\u{200B}' --zero-width space (i.e. soft-wrap mark)
+tr.ZWNBSP = '\u{FEFF}' --zero-width non-breaking space (i.e. nowrap mark)
+tr.FSP    = '\u{2007}' --figure non-breaking space (for separating digits)
 
 --font management ------------------------------------------------------------
 
@@ -165,10 +185,11 @@ local hb_glyph_size =
 	+ ffi.sizeof'hb_glyph_position_t'
 
 local function isnewline(c)
-	return c == 10 or c == 13 or c == PS or c == LS
+	return
+		(c >= 10 and c <= 13) --LF, VT, FF, CR
+		or c == PS
+		or c == LS
 		or c == 0x85 --NEL
-		or c == 0x0B --VT (Vertical Tab)
-		or c == 0x0C --FF (Form Feed)
 end
 
 --for harfbuzz, language is a ISO-639 language code + country code,
@@ -489,7 +510,7 @@ function tr:flatten(text_tree)
 	local text_runs = {}
 	flatten_text_tree(text_tree, text_runs)
 
-	--for each text run: set `font` `font_size`, `charset` and `len`.
+	--for each text run: set `font` `font_size` and `len`.
 	--also compute total text length in codepoints.
 	local len = 0
 	for _,run in ipairs(text_runs) do
@@ -508,16 +529,16 @@ function tr:flatten(text_tree)
 		assert(run.font_size, 'Font size missing')
 		run.font_size = snap(run.font_size, self.rs.font_size_resolution)
 
-		--resolve `charset`, `size` and `len` (length in codepoints).
-		run.charset = run.charset or 'utf8'
-		if run.charset == 'utf8' then
-			run.size = run.size or #run.text
-			assert(run.size, 'Text buffer size missing')
-			run.len = utf8.decode(run.text, run.size, false)
-		elseif run.charset == 'utf32' then
-			run.size = run.size or (run.len and run.len * 4) or #run.text
-			assert(run.size, 'Text buffer size missing')
-			run.len = math.floor(run.size / 4)
+		--resolve `len` (length in codepoints).
+		local charset = run.charset or 'utf8'
+		if charset == 'utf8' then
+			local size = run.size or #run.text
+			assert(size, 'Text buffer size missing')
+			run.len = utf8.decode(run.text, size, false)
+		elseif charset == 'utf32' then
+			local size = run.size or (run.len and run.len * 4) or #run.text
+			assert(size, 'Text buffer size missing')
+			run.len = math.floor(size / 4)
 		else
 			assert(false, 'Invalid charset: %s', run.charset)
 		end
@@ -529,9 +550,11 @@ function tr:flatten(text_tree)
 	local str = alloc_str(len + 1) -- +1 for linebreaks (see below)
 	local offset = 0
 	for _,run in ipairs(text_runs) do
-		if run.charset == 'utf8' then
-			utf8.decode(run.text, run.size, str + offset, run.len)
-		elseif run.charset == 'utf32' then
+		local charset = run.charset or 'utf8'
+		if charset == 'utf8' then
+			local size = run.size or #run.text
+			utf8.decode(run.text, size, str + offset, run.len)
+		elseif charset == 'utf32' then
 			ffi.copy(str + offset, ffi.cast(const_char_ct, run.text), run.len * 4)
 		end
 		run.offset = offset
@@ -544,7 +567,7 @@ function tr:flatten(text_tree)
 	return text_runs
 end
 
---itemizing and shaping a flattened text into array of segments --------------
+--itemizing and shaping a flat text into array of segments -------------------
 
 local alloc_scripts = growbuffer'hb_script_t[?]'
 local alloc_langs = growbuffer'hb_language_t[?]'
@@ -555,9 +578,13 @@ local alloc_linebreaks = growbuffer'char[?]'
 
 local tr_free = tr.free
 function tr:free()
-	alloc_scripts, alloc_langs,
-	alloc_bidi_types, alloc_bracket_types, alloc_levels,
-	alloc_linebreaks, alloc_grapheme_breaks = nil
+	alloc_scripts(false)
+	alloc_langs(false)
+	alloc_bidi_types(false)
+	alloc_bracket_types(false)
+	alloc_levels(false)
+	alloc_linebreaks(false)
+	alloc_grapheme_breaks(false)
 	tr_free(self)
 end
 
@@ -703,6 +730,7 @@ function tr:shape(text_runs)
 
 	local segments = update({tr = self}, self.segments_class) --{seg1, ...}
 
+	segments.text_runs = text_runs --for accessing codepoints by clients
 	segments.reorder = reorder_segments --for optimization
 
 	local text_run_index = 0

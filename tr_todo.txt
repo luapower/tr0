@@ -19,14 +19,20 @@ FEATURES / NOW ---------------------------------------------------------------
 
 LATER ------------------------------------------------------------------------
 
-- halign: justify:
-	- distribute whitespace uniformly, including cursor positions.
-
 - underline / strikethrough (for accelerators and links):
 	- color, thickness, style (single, double, wavy, image), dashes.
 
 - font baseline modifiers:
 	- raise, subscript, superscript, sub, sup
+
+- halign: justify:
+	- distribute whitespace uniformly, including cursor positions.
+
+- glyph substitution:
+	- font_override text attribute for manual override.
+	- register fallback fonts for script/language and try them in order.
+	- match original font's size, weight, slant, stretch.
+	- cache the substitutions.
 
 - font size modifiers:
 	- %size, big, small
@@ -35,12 +41,6 @@ LATER ------------------------------------------------------------------------
 
 - p attribute:
 	- for now: use PS (makes text more portable too).
-
-- glyph substitution:
-	- font_override text attribute for manual override.
-	- register fallback fonts for script/language and try them in order.
-	- match original font's size, weight, slant, stretch.
-	- cache the substitutions.
 
 
 EVEN LATER -------------------------------------------------------------------
@@ -53,10 +53,6 @@ EVEN LATER -------------------------------------------------------------------
 	- ascent/descent
 	- spacing_ascent/spacing_descent
 	- paragraph_ascent/paragraph_descent
-
-- horizontal alignment left/right margins option:
-	- bounding-box (problem with mixed-dir lines)
-	- advance (current solution, works with mixed-dir lines)
 
 - html-like markup parser with tags, attributes and escapes.
 	- how is it better than serialized Lua which is syntax-highlighted in code
@@ -116,10 +112,11 @@ allow coloring the diacritical marks differently than the base glyph.
 	- distort points based on path's normal vectors
 	- rasterize new distorted outline
 
-- horizontal alignment and line wrapping which excludes side bearings.
-	- diff. for RTL and LTR lines and doesn't "just work" for mixed lines
-	because bidi reordering happens after line breaking so it's not known
-	which segments will be first/last when doing line wrapping.
+- horizontal alignment left/right margins option:
+	- bounding-box: exclude side bearings eg. so that a trailing "f" doesn't
+	overflow the enclosing box. don't know how to implement for mixed-dir
+	lines because of bidi reordering.
+	- advance: current solution, works with mixed-dir lines.
 
 
 EDITING ----------------------------------------------------------------------
