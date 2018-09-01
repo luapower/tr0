@@ -4,25 +4,25 @@
 Text shaping and rendering engine for multi-language Unicode text using
 portable technologies exclusively for pixel-perfect consistent output
 across platforms. Uses [harfbuzz] for complex text shaping, [fribidi] for
-bidirectional text and [freetype] for glyph rasterization. This is the lib
-used for [ui] and all text rendering in luapower.
+bidirectional text and [freetype] for glyph rasterization. Used by [ui]
+for all text rendering.
 
 ### Features
 
   * subpixel positioning
   * OMG color emoticons!
-  * rich text layouting
   * word wrapping and alignments
-  * cursor positioning
+  * hit testing, cursors and selections
   * control over OpenType features
   * font database for font selection
+  * cursor positioning and coloring inside ligatures
   * OpenType-assisted auto-hinter enabled in freetype
 
 ### Not-yet implemented
 
   * full justification
-  * subscript/superscript
-  * underline/strikethrough
+  * subscript, superscript
+  * underline, strikethrough
   * glyph substitution
   * shaping across words
   * hyphenation
@@ -34,14 +34,27 @@ used for [ui] and all text rendering in luapower.
 ---------------------------------------------------- ------------------------------------
 `tr() -> tr`                                         create a render object
 `tr:free()`                                          free the render object
+__font management__
 `tr:add_font_file(file, ...)`                        add a font file
 `tr:add_mem_font(buf, sz, ...)`                      add a font file from a buffer
+__layouting__
 `tr:flatten(text_tree) -> text_runs`                 flatten a text tree
 `tr:shape(text_tree | text_runs) -> segs`            shape a text tree / text runs
 `segs:layout(x, y, w, h, [ha], [va]) -> segs`        layout shaped text
+__rendering__
 `segs:paint(cr)`                                     paint laid out text
 `tr:textbox(text_tree, cr, x, y, w, h, [ha], [va])`  shape, layout and paint text
-`segs:cursor() -> cursor`
+__cursors__
+`segs:cursor([offset]) -> cursor`                    create a cursor
+`cursor:pos() -> x, y, h, rtl`                       cursor position, height and direction
+`cursor:set_offset(offset)`                          move cursor to text offset
+`cursor:hit_test(x, y, ...) -> off, seg, i, line_i`  hit test
+`cursor:move_to(x, y, ...)`                          move cursor to closest position
+`cursor:next_cursor([delta]) -> off, seg, i, line_i` next/prev cursor in text
+`cursor:move(dir[, delta])`                          move cursor in text
+__selections__
+`segs:selection() -> sel`                            create a selection
+`sel:rectangles(write_func)`                         get selection rectangles
 ---------------------------------------------------- ------------------------------------
 
 ### `tr:add_font_file(file, name, [slant], [weight])`
@@ -128,3 +141,6 @@ then it only needs to handle blitting of 8-bit gray and bgra8 bitmaps and
 also bitmap scaling if you use bitmap fonts, since freetype doesn't handle
 that.
 
+### `tr:textbox(text_tree, cr, x, y, w, h, [halign], [valign]) -> segments`
+
+Shape, layout and paint text. Return segments.
