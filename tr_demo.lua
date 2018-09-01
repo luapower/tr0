@@ -11,7 +11,7 @@ local tr = tr()
 
 local win = nw:app():window{
 	x = 100, y = 60,
-	w = 910, h = 900,
+	w = 550, h = 900,
 	--w = 800, h = 600,
 }
 
@@ -134,12 +134,11 @@ function win:repaint()
 		local x, y, w, h = box2d.offset(-50, 0, 0, win:client_size())
 		rect(cr, '#888', x, y, w, h)
 
-		segs = segs or tr:shape
-		{
+		local t = {
 			line_spacing = 1.2,
 			paragraph_spacing = 1.5,
 			--{'A'},
-			font_name = 'amiri,50',
+			font_name = 'amiri,100',
 			--font_name = 'eb garamond, 50',
 
 			--'abc', 'def', 'ghi',
@@ -152,8 +151,10 @@ function win:repaint()
 			--'ABC DEF \nGHI\n',
 
 			--'مفاتيح ABC DEF\n',
-			dir = 'rtl',
-			'ABC DEF مفاتيح مفاتيح',
+			--dir = 'rtl',
+			--'ABC DEF السَّلَامُ عَلَيْكُمْ مفاتيح ',
+			--'السَّلَامُ عَلَيْكُمْ',
+			'ffi السَّلَامُ',
 
 			--dir = 'rtl', 'مفاتيح ABC', '\u{2029}', {dir = 'ltr', 'مفاتيح ABC'},
 			--'XXX פעילות ABC הבינאום DEF',
@@ -198,9 +199,23 @@ function win:repaint()
 
 			--{font_name = 'NotoColorEmoji,34', ('\xF0\x9F\x98\x81'):rep(3)},
 		}
-		lines = segs:layout(x, y, w, h, 'center', 'middle')
-		lines:paint(cr)
 
+		--[[
+		local utf8 = require'utf8'
+		local ffi = require'ffi'
+		local s,len = utf8.decode'السَّلَامُ'
+		local t = {font_name = 'amiri,100'}
+		for i=1,10 do
+			local cp = ffi.string(s+i-1, 4)
+			t[i] = {charset = 'utf32', text_len = 1, cp}
+		end
+		]]
+
+		segs = segs or tr:shape(t)
+		segs:layout(x, y, w, h, 'center', 'middle')
+		segs:paint(cr)
+
+		local lines = segs.lines
 		local x = lines.x
 		local y = lines.y + lines.baseline
 		for i,line in ipairs(lines) do
@@ -236,6 +251,13 @@ function win:repaint()
 					local hit = hit and self.hit_cursor_i == i
 					dot(cr, '#0ff', px, ay, 2)
 				end
+				for i = 0, run.len do
+					local glyph_index = run.info[i].codepoint
+					local px = i > 0 and run.pos[i-1].x_advance / 64 or 0
+					local ox = run.pos[i].x_offset / 64
+					local oy = run.pos[i].y_offset / 64
+					dot(cr, '#ff0', ax + seg.offset_x + px + ox, ay - oy, 3)
+				end
 				ax = ax + seg.advance_x
 			end
 		end
@@ -246,7 +268,6 @@ function win:repaint()
 		end
 
 		cursor = cursor or segs:cursor()
-		cursor:setlines(lines)
 		local x, y, h, rtl = cursor:pos()
 		vector(cr, '#fff', x, y, x, y+h)
 		local w = (rtl and 10 or -10)
@@ -293,7 +314,7 @@ function win:keypress(key)
 		for i = 0, cursor.seg.glyph_run.len do
 			t[#t+1] = cursor.seg.glyph_run.cursor_xs[i]
 		end
-		print(cursor.offset, cursor.seg, cursor.cursor_i,
+		print(cursor.offset, cursor.seg.index, cursor.cursor_i,
 			cursor.seg.glyph_run.cursor_xs[cursor.cursor_i], pp.format(t))
 	elseif key == 'up' then
 		cursor:move('vert', -1)

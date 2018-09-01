@@ -23,13 +23,12 @@ local band = bit.band
 local push = table.insert
 local update = glue.update
 local assert = glue.assert --assert with string formatting
-local count = glue.count
 local clamp = glue.clamp
 local snap = glue.snap
 local binsearch = glue.binsearch
 local memoize = glue.memoize
 local growbuffer = glue.growbuffer
-local reverse = glue.reverse
+local trim = glue.trim
 local bounding_box = box2d.bounding_box
 local hit_box = box2d.hit
 local odd = function(x) return band(x, 1) == 1 end
@@ -64,6 +63,10 @@ end
 
 local tr = {}
 setmetatable(tr, tr)
+
+--export these for use in text trees as paragraph and line separators.
+tr.PS = '\u{2029}'
+tr.LS = '\u{2028}'
 
 tr.glyph_run_cache_size = 1024^2 * 10 --10MB net (arbitrary default)
 
@@ -127,78 +130,35 @@ function tr:add_mem_font(...)
 	return override_font(self.rs:add_mem_font(...))
 end
 
+--hb_feature_t lists ---------------------------------------------------------
+
+local alloc_hb_features = ffi.typeof'hb_feature_t[?]'
+
+--parse a string of harfbuzz features into a `hb_feature_t` array.
+local function parse_features(s)
+	local n = 0
+	for _ in s:gmatch'()[^%s]+' do
+		n = n + 1
+	end
+	local feats = alloc_hb_features(n)
+	local i = 0
+	for s in s:gmatch'[^%s]+' do
+		assert(hb.feature(s, feats[i]), 'Invalid feature: %s', s)
+		i = i + 1
+	end
+	return {feats, n}
+end
+parse_features = memoize(parse_features)
+
+local function hb_features(s)
+	if not s then return nil, 0 end
+	return unpack(parse_features(s))
+end
+
 --shaping a single text run into an array of glyphs --------------------------
 
 local glyph_run = {} --glyph run methods
 tr.glyph_run_class = glyph_run
-
-function glyph_run:free()
-	self.hb_buf:free()
-	self.hb_buf = false
-	self.info = false
-	self.pos = false
-	self.len = 0
-	self.font:unref()
-	self.font = false
-end
-
-function glyph_run:glyph_range(wrapped)
-	if wrapped and self.trailing_space then
-		if rtl then
-			return 1, self.len-1
-		else
-			return 0, self.len-2
-		end
-	else
-		return 0, self.len-1
-	end
-end
-
-function glyph_run:offset_range(wrapped)
-	if wrapped and self.trailing_space then
-		return 0, self.text_len-2
-	else
-		return 0, self.text_len-1
-	end
-end
-
-function glyph_run:check_offset(i, wrapped)
-	local i1, i2 = self:offset_range(wrapped)
-	assert(i >= i1)
-	assert(i <= i2 + 1)
-	return i
-end
-
---[[
---not yet used.
-function glyph_run:glyph_metrics(i)
-	local glyph_index = self.info[i].codepoint
-	return self.tr.rs:glyph_metrics(self.font, self.font_size, glyph_index)
-end
-
-function glyph_run:bounding_box()
-	local bx, by, bw, bh = 0, 0, 0, 0
-	for i = 0, glyph_count-1 do
-
-		--glyph origin relative to the start of the run.
-		local ax = i > 0 and glyph_pos[i-1].x_advance or 0
-		local ay = 0
-		local px = ax + glyph_pos[i].x_offset
-		local py = ay - glyph_pos[i].y_offset
-
-		--glyph run metrics, used for more precise word wrapping and alignment
-		--(commented because not used in current layouting algorithm).
-		local glyph_index = glyph_info[i].codepoint
-		local m = self.rs:glyph_metrics(font, font_size, glyph_index)
-		bx, by, bw, bh = bounding_box(bx, by, bw, bh,
-			px / 64 + m.hlsb,
-			py / 64 - m.htsb,
-			m.w, m.h)
-
-	end
-	return bx, by, bw, bh
-end
-]]
 
 local hb_glyph_size =
 	ffi.sizeof'hb_glyph_info_t'
@@ -255,23 +215,25 @@ local alloc_double_array = ffi.typeof'double[?]'
 
 function tr:shape_text_run(
 	str, str_offset, len, trailing_space,
-	font, font_size, features, feat_count,
+	font, font_size, features,
 	rtl, script, lang
 )
 	zone'hb_shape' ------------------------------------------------------------
 
 	font:ref()
 	font:setsize(font_size)
-
 	local hb_dir = rtl and hb.C.HB_DIRECTION_RTL or hb.C.HB_DIRECTION_LTR
-
 	local hb_buf = hb.buffer()
-	hb_buf:set_cluster_level(hb.C.HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES)
+	hb_buf:set_cluster_level(
+		--hb.C.HB_BUFFER_CLUSTER_LEVEL_MONOTONE_CHARACTERS
+		hb.C.HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES
+		--hb.C.HB_BUFFER_CLUSTER_LEVEL_CHARACTERS
+	)
 	hb_buf:set_direction(hb_dir)
 	hb_buf:set_script(script)
 	hb_buf:set_language(lang)
 	hb_buf:add_codepoints(str + str_offset, len)
-	hb_buf:shape(font.hb_font, features, feat_count)
+	hb_buf:shape(font.hb_font, hb_features(features))
 
 	local glyph_count = hb_buf:get_length()
 	local glyph_info  = hb_buf:get_glyph_infos()
@@ -300,7 +262,7 @@ function tr:shape_text_run(
 	local cursor_offsets = alloc_int_array(len + 1) --in logical order
 	local cursor_xs = alloc_double_array(len + 1) --in logical order
 	for i = 0, len do
-		cursor_offsets[i] = -1/0 --invalid offset, fixed later
+		cursor_offsets[i] = -1 --invalid offset, fixed later
 	end
 
 	local grapheme_breaks --allocated on demand for multi-codepoint clusters
@@ -371,11 +333,12 @@ function tr:shape_text_run(
 	end
 
 	if rtl then
+		--add last logical (first visual), after-the-text cursor
+		cursor_offsets[len] = len
+		cursor_xs[len] = 0
 		local i, n --index in glyph_info, glyph count.
 		local c, cn, cx --cluster, cluster len, cluster x.
 		c = len
-		cursor_offsets[c] = c
-		cursor_xs[c] = 0
 		for i1, n1, c1 in rle_runs(glyph_info, glyph_count, get_cluster) do
 			cx = pos_x(i1)
 			if i then
@@ -402,15 +365,16 @@ function tr:shape_text_run(
 			local cn = len - c
 			add_cursors(i, n, c, cn, cx)
 		end
+		--add last logical (last visual), after-the-text cursor
 		cursor_offsets[len] = len
 		cursor_xs[len] = ax
 	end
 
-	if grapheme_breaks then --we found clusters with multiple codepoints.
-		--add cursor offsets for all codepoints which are missing one.
+	--add cursor offsets for all codepoints which are missing one.
+	if grapheme_breaks then --there are clusters with multiple codepoints.
 		local c, x --cluster, cluster x.
 		for i = 0, len do
-			if cursor_offsets[i] == -1/0 then
+			if cursor_offsets[i] == -1 then
 				cursor_offsets[i] = c
 				cursor_xs[i] = x
 			else
@@ -458,9 +422,19 @@ function tr:shape_text_run(
 	return glyph_run
 end
 
+function glyph_run:free()
+	self.hb_buf:free()
+	self.hb_buf = false
+	self.info = false
+	self.pos = false
+	self.len = 0
+	self.font:unref()
+	self.font = false
+end
+
 function tr:glyph_run(
 	str, str_offset, len, trailing_space,
-	font, font_size, features, feat_count,
+	font, font_size, features,
 	rtl, script, lang
 )
 	font:ref()
@@ -475,54 +449,26 @@ function tr:glyph_run(
 	if not glyph_run then
 		glyph_run = self:shape_text_run(
 			str, str_offset, len, trailing_space,
-			font, font_size, features, feat_count,
+			font, font_size, features,
 			rtl, script, lang
 		)
 		self.glyph_runs:put(key, glyph_run)
 	end
+
 	font:unref()
 	return glyph_run
 end
 
---shaping a text tree into an array of segments ------------------------------
+--flattening a text tree into a utf32 string + metadata ----------------------
 
-local alloc_hb_features = ffi.typeof'hb_feature_t[?]'
-
---convert a Lua table of {name -> value} into an array of hb_feature_t.
-local function hb_feature_list(features)
-	if type(features) == 'string' then --'+/-feat1 feat2=val ...'
-		local s = features
-		features = {}
-		for s in s:gmatch'[^%s]+' do
-			push(features, s)
-		end
-	end
-	local feat_count = count(features)
-	local feats = alloc_hb_features(feat_count)
-	local i = 0
-	for k,v in pairs(features) do
-		if type(k) == 'number' then --in array part
-			k, v = v, nil
-		end
-		assert(hb.feature(k, feats[i]), 'Invalid feature: %s', k)
-		if v ~= nil then --value set with '+/-feat' syntax
-			feats[i].value = v
-		end
-		i = i + 1
-	end
-	assert(i == feat_count)
-	return feats, feat_count
-end
-
-local sizeof_feature_t = ffi.sizeof'hb_feature_t'
+local alloc_str = ffi.typeof'uint32_t[?]'
+local const_char_ct = ffi.typeof'const char*'
 
 --convert a tree of nested text runs into a flat list of runs with properties
 --dynamically inherited from the parent nodes.
---NOTE: one text run is always created, even when there's no text, in order
---to anchor the text properties to a segment and to create a cursor.
-local global_hb_feature_list = hb_feature_list
-local function flatten_text_tree(parent, runs, hb_feature_list)
-	hb_feature_list = hb_feature_list or memoize(global_hb_feature_list)
+--NOTE: one text run is always created for each table, even when there's
+--no text, in order to anchor the attrs to a segment and to create a cursor.
+local function flatten_text_tree(parent, runs)
 	for i = 1, math.max(1, #parent) do
 		local run_or_text = parent[i] or ''
 		local run
@@ -531,21 +477,74 @@ local function flatten_text_tree(parent, runs, hb_feature_list)
 			push(runs, run)
 		else
 			run = run_or_text
-			--TODO: we shouldn't modify user args.
-			run.__index = parent
-			setmetatable(run, run)
-			flatten_text_tree(run, runs, hb_feature_list)
+			flatten_text_tree(run, runs)
 		end
 		run.__index = parent
 		setmetatable(run, run)
-		--TODO: individually inheritable features.
-		if run.features then
-			run.features = hb_feature_list(run.features)
-			run.feat_count = ffi.sizeof(run.features) / sizeof_feature_t
-		end
 	end
-	return runs
 end
+
+function tr:flatten(text_tree)
+
+	local text_runs = {}
+	flatten_text_tree(text_tree, text_runs)
+
+	--for each text run: set `font` `font_size`, `charset` and `len`.
+	--also compute total text length in codepoints.
+	local len = 0
+	for _,run in ipairs(text_runs) do
+
+		--resolve `font` and `font_size`.
+		local font_name = run.font_name
+		local weight = (run.bold or run.b) and 'bold' or run.font_weight
+		local slant = (run.italic or run.i) and 'italic' or run.font_slant
+		local font_size = run.font_size
+		run.font, run.font_size = self.rs.font_db:find_font(
+			font_name, weight, slant, font_size
+		)
+		assert(run.font, 'Font not found: "%s" %s %s %s',
+			font_name, weight or '', slant or '', font_size or ''
+		)
+		assert(run.font_size, 'Font size missing')
+		run.font_size = snap(run.font_size, self.rs.font_size_resolution)
+
+		--resolve `charset`, `size` and `len` (length in codepoints).
+		run.charset = run.charset or 'utf8'
+		if run.charset == 'utf8' then
+			run.size = run.size or #run.text
+			assert(run.size, 'Text buffer size missing')
+			run.len = utf8.decode(run.text, run.size, false)
+		elseif run.charset == 'utf32' then
+			run.size = run.size or (run.len and run.len * 4) or #run.text
+			assert(run.size, 'Text buffer size missing')
+			run.len = math.floor(run.size / 4)
+		else
+			assert(false, 'Invalid charset: %s', run.charset)
+		end
+
+		len = len + run.len
+	end
+
+	--resolve `offset` and convert/place text into a linear utf32 buffer.
+	local str = alloc_str(len + 1) -- +1 for linebreaks (see below)
+	local offset = 0
+	for _,run in ipairs(text_runs) do
+		if run.charset == 'utf8' then
+			utf8.decode(run.text, run.size, str + offset, run.len)
+		elseif run.charset == 'utf32' then
+			ffi.copy(str + offset, ffi.cast(const_char_ct, run.text), run.len * 4)
+		end
+		run.offset = offset
+		offset = offset + run.len
+	end
+
+	text_runs.codepoints = str
+	text_runs.len = len
+
+	return text_runs
+end
+
+--itemizing and shaping a flattened text into array of segments --------------
 
 local alloc_scripts = growbuffer'hb_script_t[?]'
 local alloc_langs = growbuffer'hb_language_t[?]'
@@ -562,63 +561,16 @@ function tr:free()
 	tr_free(self)
 end
 
-local alloc_str = ffi.typeof'uint32_t[?]'
-local const_char_ct = ffi.typeof'const char*'
+local const_uint32_ct = ffi.typeof'const uint32_t*'
 
-function tr:shape(text_tree)
+function tr:shape(text_runs)
 
-	local text_runs = flatten_text_tree(text_tree, {})
-
-	--for each text run: set `font` `font_size`, `charset` and `len`.
-	--also compute total text length in codepoints.
-	local len = 0
-	for _,run in ipairs(text_runs) do
-
-		--resolve font and font_size.
-		local font_name = run.font_name
-		local weight = (run.bold or run.b) and 'bold' or run.font_weight
-		local slant = (run.italic or run.i) and 'italic' or run.font_slant
-		local font_size = run.font_size
-		run.font, run.font_size = self.rs.font_db:find_font(
-			font_name, weight, slant, font_size
-		)
-		assert(run.font, 'Font not found: "%s" %s %s %s',
-			font_name, weight or '', slant or '', font_size or ''
-		)
-		assert(run.font_size, 'Font size missing')
-		run.font_size = snap(run.font_size, self.rs.font_size_resolution)
-
-		--compute run's length in codepoints.
-		local text_size = run.text_size or #run.text
-		assert(text_size, 'Text buffer size missing')
-		run.charset = run.charset or 'utf8'
-		if run.charset == 'utf8' then
-			run.len = utf8.decode(run.text, text_size, false)
-		elseif run.charset == 'utf32' then
-			run.len = math.floor(text_size / 4)
-		else
-			assert(false, 'Invalid charset: %s', run.charset)
-		end
-
-		len = len + run.len
+	if not text_runs.codepoints then --it's a text_tree, flatten it
+		text_runs = self:flatten(text_runs)
 	end
 
-	--for each text run: set `offset`.
-	--also convert and concatenate text into a single utf32 buffer.
-	local str = alloc_str(len + 1) -- +1 for linebreaks (see below)
-	local offset = 0
-	for _,run in ipairs(text_runs) do
-		if run.charset == 'utf8' then
-			utf8.decode(run.text, run.text_size, str + offset, run.len)
-		elseif run.charset == 'utf32' then
-			ffi.copy(str + offset, ffi.cast(const_char_ct, run.text), run.len * 4)
-		end
-		run.offset = offset
-		offset = offset + run.len
-	end
-
-	text_runs.codepoints = str --anchor it (for editing)
-	text_runs.len = len --for bounds checking
+	local str = ffi.cast(const_uint32_ct, text_runs.codepoints)
+	local len = text_runs.len
 
 	--detect the script property for each char of the entire text.
 	local scripts = alloc_scripts(len)
@@ -755,7 +707,7 @@ function tr:shape(text_tree)
 
 	local text_run_index = 0
 	local next_i = 0 --char offset of the next text run
-	local text_run, font, font_size, features, feat_count --per-text-run attrs
+	local text_run, font, font_size, features --per-text-run attrs
 	local level, script, lang --per-char attrs
 
 	local seg_offset = 0 --curent segment's offset in text
@@ -767,7 +719,7 @@ function tr:shape(text_tree)
 	for i = 0, len do --NOTE: going one char beyond the text!
 
 		--per-text-run attts for the current char.
-		local text_run1, font1, font_size1, features1, feat_count1
+		local text_run1, font1, font_size1, features1
 
 		--change to the next text run if we're past the current text run.
 		--NOTE: this runs when i == 0 and when len == 0 but not when i == len.
@@ -779,7 +731,6 @@ function tr:shape(text_tree)
 			font1 = text_run1.font
 			font_size1 = text_run1.font_size
 			features1 = text_run1.features
-			feat_count1 = text_run1.feat_count
 
 			next_i = text_run1.offset + text_run1.len
 			next_i = next_i < len and next_i
@@ -791,7 +742,6 @@ function tr:shape(text_tree)
 			font1 = font
 			font_size1 = font_size
 			features1 = features
-			feat_count1 = feat_count
 
 		end
 
@@ -821,7 +771,6 @@ function tr:shape(text_tree)
 			font = font1
 			font_size = font_size1
 			features = features1
-			feat_count = feat_count1
 
 			level = level1
 			script = script1
@@ -874,7 +823,7 @@ function tr:shape(text_tree)
 			--shape the segment excluding trailing linebreak chars.
 			local glyph_run = self:glyph_run(
 				str, seg_offset, seg_len, trailing_space,
-				font, font_size, features, feat_count,
+				font, font_size, features,
 				rtl, script, lang
 			)
 
@@ -923,6 +872,8 @@ function tr:shape(text_tree)
 					local next_sub_offset = glyph_run.cursor_offsets[next_sub_offset]
 					local sub_len = next_sub_offset - sub_offset
 
+					print((i+1)/2, sub_offset, sub_len, next_sub_offset)
+
 					if sub_len == 0 then
 						break
 					end
@@ -934,6 +885,7 @@ function tr:shape(text_tree)
 					local last_glyph_i
 
 					if rtl then
+
 						last_glyph_i = (binsearch(
 							next_sub_offset, glyph_run.info,
 							cmp_clusters_reverse,
@@ -962,7 +914,9 @@ function tr:shape(text_tree)
 						sub_offset = next_sub_offset
 						glyph_i = last_glyph_i - (clip_left and 0 or 1)
 						clip_right = clip_left
+
 					else
+
 						last_glyph_i = (binsearch(
 							next_sub_offset, glyph_run.info,
 							cmp_clusters,
@@ -991,6 +945,7 @@ function tr:shape(text_tree)
 						sub_offset = next_sub_offset
 						glyph_i = last_glyph_i + (clip_right and 0 or 1)
 						clip_left = clip_right
+
 					end
 				end
 				substack_n = 0 --empty the stack
@@ -1022,7 +977,6 @@ function tr:shape(text_tree)
 		font = font1
 		font_size = font_size1
 		features = features1
-		feat_count = feat_count1
 
 		level = level1
 		script = script1
@@ -1044,10 +998,10 @@ function segments:nowrap_segments(seg_i)
 	if not seg.text_run.nowrap then
 		local wx = run.wrap_advance_x
 		local ax = run.advance_x
-		local wx = seg.linebreak and ax or wx
+		local wx = (seg.linebreak or seg_i == #self) and ax or wx
 		return wx, ax, seg_i + 1
 	end
-	local ax = 0 --advance_x of last segment
+	local ax = 0
 	local n = #self
 	for i = seg_i, n do
 		local seg = self[i]
@@ -1072,9 +1026,8 @@ function segments:layout(x, y, w, h, halign, valign)
 	assert(valign == 'top' or valign == 'bottom' or valign == 'middle',
 		'Invalid valign: %s', valign)
 
-	local lines = update({
-		tr = self.tr, segments = self,
-	}, self.tr.lines_class)
+	local lines = {}
+	self.lines = lines
 
 	--do line wrapping and compute line advance.
 	zone'linewrap'
@@ -1085,7 +1038,9 @@ function segments:layout(x, y, w, h, halign, valign)
 		local segs_wx, segs_ax, next_seg_i = self:nowrap_segments(seg_i)
 
 		local hardbreak = not line
-		local softbreak = not hardbreak and line.advance_x + segs_wx > w
+		local softbreak = not hardbreak
+			and segs_wx > 0 --don't create a new line for an empty segment
+			and line.advance_x + segs_wx > w
 
 		if hardbreak or softbreak then
 
@@ -1107,7 +1062,7 @@ function segments:layout(x, y, w, h, halign, valign)
 				spacing_ascent = 0, spacing_descent = 0,
 			}
 			line_i = line_i + 1
-			lines[line_i] = line
+			self.lines[line_i] = line
 
 		end
 
@@ -1227,15 +1182,12 @@ function segments:layout(x, y, w, h, halign, valign)
 	lines.x = x
 	lines.y = y
 
-	return lines
+	return self
 end
-
-local lines = {} --methods for line list
-tr.lines_class = lines
 
 tr.default_color = '#fff'
 
-function lines:paint_glyph_run(cr, rs, run, i, j, ax, ay, color, clip_left, clip_right)
+function segments:paint_glyph_run(cr, rs, run, i, j, ax, ay, color, clip_left, clip_right)
 	rs:setcolor(cr, color)
 	for i = i, j do
 
@@ -1277,13 +1229,15 @@ function lines:paint_glyph_run(cr, rs, run, i, j, ax, ay, color, clip_left, clip
 	end
 end
 
-function lines:paint(cr)
+function segments:paint(cr)
 	local rs = self.tr.rs
 	local default_color = self.tr.default_color
-	for _,line in ipairs(self) do
+	local lines = self.lines
 
-		local ax = self.x + line.x
-		local ay = self.y + self.baseline + line.y
+	for _,line in ipairs(lines) do
+
+		local ax = lines.x + line.x
+		local ay = lines.y + lines.baseline + line.y
 
 		for _,seg in ipairs(line) do
 
@@ -1304,6 +1258,7 @@ function lines:paint(cr)
 			ax = ax + seg.advance_x
 		end
 	end
+
 	return self
 end
 
@@ -1323,16 +1278,20 @@ function segments:cursor_at_offset(offset)
 	local seg_i = (binsearch(offset, self, cmp_offsets) or #self + 1) - 1
 	local seg = self[seg_i]
 	local run = seg.glyph_run
-	local rel_offset = run:check_offset(offset - seg.offset)
-	return seg, run.cursor_offsets[rel_offset]
+	local i = offset - seg.offset
+	assert(i >= 0)
+	assert(i <= run.text_len)
+	return seg, run.cursor_offsets[i]
 end
 
 function segments:offset_at_cursor(seg, i)
-	return seg.offset + seg.glyph_run:check_offset(i)
+	assert(i >= 0)
+	assert(i <= seg.glyph_run.text_len)
+	return seg.offset + i
 end
 
 --move `delta` cursor positions from a certain cursor position.
-function segments:next_cursor(seg, ci, delta)
+function segments:next_physical_cursor(seg, ci, delta)
 	delta = math.floor(delta or 0) --prevent infinite loop
 	local step = delta > 0 and 1 or -1
 	local offsets = seg.glyph_run.cursor_offsets
@@ -1351,37 +1310,100 @@ function segments:next_cursor(seg, ci, delta)
 		end
 		assert(i >= 0)
 		assert(i <= len)
-		local moved = offsets[i] ~= offsets[ci]
-		delta = delta - (moved and step or 0)
+		delta = delta - step
 		ci = i
 	end
 	return seg, ci, delta
 end
 
+--move `delta` unique cursor positions from a certain cursor position.
+function segments:next_unique_cursor(seg, i, delta)
+	local step = (delta or 1) > 0 and 1 or -1
+	local seg0, i0 = seg, i
+	local offset0 = self:offset_at_cursor(seg, i)
+	local x0, y0
+	::again::
+	seg, i, delta = self:next_physical_cursor(seg, i, delta)
+	if delta == 0 then
+		if self:offset_at_cursor(seg, i) == offset0 then
+			local x1, y1 = self:cursor_pos(seg, i)
+			if not x0 then
+				x0, y0 = self:cursor_pos(seg0, i0)
+			end
+			if x1 == x0 and y1 == y0 then
+				--duplicate cursor (same text position and same screen position):
+				--advance further until a different one is found.
+				delta = step
+				goto again
+			end
+		end
+	end
+	return seg, i, delta
+end
+
+--move `delta` cursor positions from a certain cursor position.
+--advance until the furthest cursor position with the required offset.
+function segments:next_greedy_cursor(seg, i, delta)
+	local step = (delta or 1) > 0 and 1 or -1
+	local seg0, i0 = seg, i
+	local offset0 = self:offset_at_cursor(seg, i)
+	local x0, y0
+	local target_offset
+	::again::
+	seg, i, delta = self:next_physical_cursor(seg, i, delta)
+	if delta == 0 then
+		local offset = self:offset_at_cursor(seg, i)
+		if offset == offset0 then
+			--duplicate cursor (same text position):
+			--advance further until a different one is found.
+			delta = step
+			goto again
+		else
+			target_offset = offset
+		end
+	end
+	if target_offset and step < 0 then
+		::again::
+		local seg1, i1, delta1 = self:next_physical_cursor(seg, i, delta)
+		if delta1 == 0 then
+			local offset = self:offset_at_cursor(seg1, i1)
+			if offset == target_offset then
+				--duplicate cursor (same text position):
+				--advance further until a different one is found.
+				seg, i, delta = seg1, i1, delta1
+				delta = step
+				goto again
+			end
+		end
+	end
+	return seg, i, delta
+end
+
 local function cmp_ys(lines, i, y)
 	return lines[i].y - lines[i].spacing_descent < y
 end
-function lines:hit_test_lines(x, y,
+function segments:hit_test_lines(x, y,
 	extend_top, extend_bottom, extend_left, extend_right
 )
-	x = x - self.x
-	y = y - (self.y + self.baseline)
-	if y < -self[1].spacing_ascent then
+	local lines = self.lines
+	x = x - lines.x
+	y = y - (lines.y + lines.baseline)
+	if y < -lines[1].spacing_ascent then
 		return extend_top and 1 or nil
-	elseif y > self[#self].y - self[#self].spacing_descent then
-		return extend_bottom and #self or nil
+	elseif y > lines[#lines].y - lines[#lines].spacing_descent then
+		return extend_bottom and #lines or nil
 	else
-		local i = binsearch(y, self, cmp_ys) or #self
-		local line = self[i]
+		local i = binsearch(y, lines, cmp_ys) or #lines
+		local line = lines[i]
 		return (extend_left or x >= line.x)
 			and (extend_right or x <= line.x + line.advance_x)
 			and i or nil
 	end
 end
 
-function lines:hit_test_cursors(line_i, x, extend_left, extend_right)
-	local line = self[line_i]
-	local ax = self.x + line.x
+function segments:hit_test_cursors(line_i, x, extend_left, extend_right)
+	local line = self.lines[line_i]
+	local ax = self.lines.x + line.x
 	for seg_i, seg in ipairs(line) do
 		local run = seg.glyph_run
 		local x = x - ax
@@ -1402,7 +1424,7 @@ function lines:hit_test_cursors(line_i, x, extend_left, extend_right)
 	end
 end
 
-function lines:hit_test(x, y,
+function segments:hit_test(x, y,
 	extend_top, extend_bottom, extend_left, extend_right
 )
 	local line_i = self:hit_test_lines(x, y,
@@ -1412,14 +1434,11 @@ function lines:hit_test(x, y,
 	return line_i, self:hit_test_cursors(line_i, x, extend_left, extend_right)
 end
 
-function lines:offset_at_cursor(seg, cursor_i)
-	return self.segments:offset_at_cursor(seg, cursor_i)
-end
-
-function lines:cursor_pos(seg, cursor_i)
-	local line = self[seg.line_index]
-	local ax = self.x + line.x
-	local ay = self.y + self.baseline + line.y
+function segments:cursor_pos(seg, cursor_i)
+	local lines = self.lines
+	local line = lines[seg.line_index]
+	local ax = lines.x + line.x
+	local ay = lines.y + lines.baseline + line.y
 	--TODO: store ax for each segment to avoid O(n) when displaying cursors?
 	local target_seg = seg
 	for _,seg in ipairs(line) do
@@ -1450,13 +1469,6 @@ function segments:cursor(offset)
 	return self
 end
 
-function cursor:setlines(lines)
-	if self.lines == lines then return end
-	assert(lines.segments == self.segments)
-	self.lines = lines
-	self.x = false
-end
-
 function cursor:set_offset(offset)
 	self.seg, self.cursor_i = self.segments:cursor_at_offset(offset)
 	self.offset = self.segments:offset_at_cursor(self.seg, self.cursor_i)
@@ -1464,14 +1476,14 @@ end
 
 --text position -> layout position.
 function cursor:pos()
-	return self.lines:cursor_pos(self.seg, self.cursor_i)
+	return self.segments:cursor_pos(self.seg, self.cursor_i)
 end
 
 --layout position -> text position.
 function cursor:hit_test(x, y, ...)
-	local line_i, seg, cursor_i = self.lines:hit_test(x, y, ...)
+	local line_i, seg, cursor_i = self.segments:hit_test(x, y, ...)
 	if not cursor_i then return nil end
-	return self.lines:offset_at_cursor(seg, cursor_i), seg, cursor_i, line_i
+	return self.segments:offset_at_cursor(seg, cursor_i), seg, cursor_i, line_i
 end
 
 --move based on a layout position.
@@ -1483,34 +1495,22 @@ function cursor:move_to(x, y, ...)
 end
 
 function cursor:next_cursor(delta)
-	local seg, cursor_i = self.seg, self.cursor_i
-	local step = (delta or 1) > 0 and 1 or -1
-	::again::
-	seg, cursor_i, delta = self.segments:next_cursor(seg, cursor_i, delta)
-	if delta == 0 then
-		if self.segments:offset_at_cursor(seg, cursor_i) == self.offset then
-			local x1, y1 = self.lines:cursor_pos(seg, cursor_i)
-			local x0, y0 = self:pos()
-			if x1 == x0 and y1 == y0 then
-				--duplicate cursor (same text position and same screen position):
-				--advance further until a different one is found.
-				delta = step
-				goto again
-			end
-		end
-	end
-	local offset = self.segments:offset_at_cursor(seg, cursor_i)
-	return offset, seg, cursor_i, delta
+	local seg, i, delta =
+		self.segments:next_unique_cursor(
+			self.seg, self.cursor_i, delta
+		)
+	local offset = self.segments:offset_at_cursor(seg, i)
+	return offset, seg, i, delta
 end
 
 function cursor:next_line(delta)
 	local offset, seg, cursor_i = self.offset, self.seg, self.cursor_i
 	local x = self.x or self:pos()
 	local wanted_line_i = seg.line_index + delta
-	local line_i = clamp(wanted_line_i, 1, #self.lines)
+	local line_i = clamp(wanted_line_i, 1, #self.segments.lines)
 	local delta = wanted_line_i - line_i
-	local line = self.lines[line_i]
-	local seg1, cursor_i1 = self.lines:hit_test_cursors(line_i, x, true, true)
+	local line = self.segments.lines[line_i]
+	local seg1, cursor_i1 = self:hit_test_cursors(line_i, x, true, true)
 	if seg1 then
 		seg, cursor_i = seg1, cursor_i1
 		offset = self.segments:offset_at_cursor(seg, cursor_i)
