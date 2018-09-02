@@ -259,9 +259,9 @@ start of the glyph run), so a cursor position and its corresponding codepoint
 offset can be found for any text offset in O(1). Unique cursors are created
 at *cluster* boundaries (a term which means indivisible unit of text from
 harfbuzz's point of view) but additional cursors are also created at
-*grapheme boundaries* for clusters that contain multiple graphemes like
-"fi" ligatures. Some OpenType fonts contain cursor positions for such
-ligatures which we'll use if available.
+*grapheme boundaries* for clusters/glyphs that cover multiple graphemes like
+ligated "fi" pairs. Some OpenType fonts contain cursor positions for such
+ligatures which are used for this case, if available.
 
 Duplicate cursors are not pruned. For example, the first cursor of the glyph
 run of any segment is the same as the last cursor of the glyph run of the
