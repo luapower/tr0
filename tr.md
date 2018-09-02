@@ -158,13 +158,12 @@ Paint the shaped and laid out text into a graphics context.
 When the `tr` object is created, a rasterizer object is created by calling
 `tr:create_rasterizer()` which loads the module pointed out by
 `tr.rasterizer_module` which defaults to `tr_raster_cairo` which implements
-a simple rasterizer which can paint glyphs into a [cairo] context. In order
-to paint the text using other graphics libraries you need to implement a new
-rasterizer. Glyph caching and the actual rasterization is done in
-`tr_raster_ft` using [freetype], so your rasterizer can subclass that and
-then it only needs to handle blitting of 8-bit gray and bgra8 bitmaps and
-also bitmap scaling if you use bitmap fonts, since freetype doesn't handle
-that.
+a simple rasterizer which can paint glyphs into a [cairo] context. To paint
+glyphs using other graphics APIs you need to implement a new rasterizer.
+Glyph caching and the actual rasterization is done in `tr_raster_ft` using
+[freetype], so your rasterizer can subclass that and then it only needs to
+handle blitting of 8-bit gray and 32-bit BGRA bitmaps and also bitmap scaling
+if you use bitmap fonts, since freetype doesn't handle that.
 
 ### `tr:textbox(text_tree, cr, x, y, w, h, [halign], [valign]) -> segments`
 
@@ -242,11 +241,12 @@ can also be done without re-layouting.
 Rendering is the process of rasterizing the glyphs of the glyph runs
 individually and then blitting the resulting bitmaps onto a raster surface
 at the right positions. The parsing of font files for glyph outlines and the
-actual rasterization is done by freetype, with the caviat that bitmap fonts
+actual rasterization is done by freetype, with the caveat that bitmap fonts
 (emoticons) must be scaled separately because freetype doesn't handle that.
 Rasterized/scaled glyphs are cached using a global LRU cache with a
 configurable byte-size limit. Scaling and blitting depends on the target
-surface and it's thus separated in a subclass of the base freetype rasterizer,
-so that new blitters can be created with minimum effort.
+surface and it's thus separated in a subclass of the freetype rasterizer
+so that blitters can be created with minimum effort (the current cairo-based
+blitter is under 200 LOC).
 
 Rendering can be performed multiple times in O(n).
