@@ -91,7 +91,7 @@ Attributes can be:
   * `font_slant`: font slant override: `'italic'`, `'normal'`.
   * `bold`, `b`, `italic`, `i`: `font_weight` and `font_slant` overrides.
   * `features`: a list of OpenType features in string form, eg.
-  `+kern -liga smcp`
+  `'+kern -liga smcp'`
   * `script`: an [ISO-15924] script tag (the default is auto-detected).
   * `lang`: a [BCP-47] language-country code (the default is auto-detected).
   * `dir`: `'ltr'`, `'rtl'`, `'auto'`: bidi direction for current and
