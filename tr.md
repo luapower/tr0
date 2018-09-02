@@ -1,11 +1,11 @@
 
 ## `local tr = require'tr'`
 
-Text shaping and rendering engine for multi-language Unicode text using
-portable technologies exclusively for pixel-perfect consistent output
-across platforms. Uses [harfbuzz] for complex text shaping, [fribidi] for
-bidirectional text, [libunibreak] for line breaking and [freetype] for
-glyph rasterization. Used by [ui] for all text rendering.
+Text shaping and rendering engine for Unicode text using portable technologies
+exclusively for pixel-perfect consistent output across platforms. Uses
+[harfbuzz] for complex text shaping, [fribidi] for bidirectional text,
+[libunibreak] for line breaking and [freetype] for glyph rasterization.
+Used by [ui] for all text rendering.
 
 Supports subpixel positioning, color bitmap fonts (emoticons!), word
 wrapping, alignments, hit testing, cursors, selections, control over OpenType
