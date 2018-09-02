@@ -90,8 +90,8 @@ Attributes can be:
   number between `100` and `900`.
   * `font_slant`: font slant override: `'italic'`, `'normal'`.
   * `bold`, `b`, `italic`, `i`: `font_weight` and `font_slant` overrides.
-  * `features`: a list of OpenType features in string form:
-  `feat1 +feat2 -feat3 feat4=1`
+  * `features`: a list of OpenType features in string form, eg.
+  `+kern -liga smcp`
   * `script`: an [ISO-15924] script tag (the default is auto-detected).
   * `lang`: a [BCP-47] language-country code (the default is auto-detected).
   * `dir`: `'ltr'`, `'rtl'`, `'auto'`: bidi direction for current and
