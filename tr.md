@@ -7,26 +7,13 @@ across platforms. Uses [harfbuzz] for complex text shaping, [fribidi] for
 bidirectional text, [libunibreak] for line breaking and [freetype] for
 glyph rasterization. Used by [ui] for all text rendering.
 
-### Features
+Supports subpixel positioning, color bitmap fonts (emoticons!), word
+wrapping, alignments, hit testing, cursors, selections, control over OpenType
+features, cursors and coloring inside ligatures, OpenType-assisted auto-hinter.
 
-  * subpixel positioning
-  * OMG color emoticons!
-  * word wrapping and alignments
-  * hit testing, cursors and selections
-  * control over OpenType features
-  * cursor positioning and coloring inside ligatures
-  * OpenType-assisted auto-hinter enabled in freetype
-
-### Not-yet implemented
-
-  * full justification
-  * subscript, superscript
-  * underline, strikethrough
-  * glyph substitution
-  * shaping across words
-  * hyphenation
-  * letter spacing
-  * vertical layout
+Not-yet implemented: full justification, subscript, superscript, underline,
+strikethrough, glyph substitution, shaping across words, hyphenation,
+letter spacing, vertical layout.
 
 ### API
 
