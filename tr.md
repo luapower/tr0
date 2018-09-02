@@ -148,7 +148,7 @@ described by `x, y, w, h`.
   * returns `segments` for chain calling.
   * sets `segments.lines.x` and `segments.lines.y` which can be later changed
   without the need to call `layout()` again.
-  * sets `text_runs`
+  * sets `text_runs` for accessing the codepoints.
   * once the text is laid out, it can be painted many times with `paint()`.
 
 ### `segments:paint(cr)`
