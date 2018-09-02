@@ -172,14 +172,14 @@ Shape, layout and paint text. Return segments.
 
 ## Rendering stages
 
-#### 1. Text tree flattening.
+#### 1. Text tree flattening
 
 The text comes into the engine in the most convenient form for the user,
 which is a tree of nested text nodes, similar to HTML. It is first converted
 into a flat array of codepoints and an accompanying list of *text runs*
 containing metadata for each piece of text contained in the tree.
 
-#### 2. Text itemization and shaping.
+#### 2. Itemization and shaping
 
 The flattened text is broken into paragraphs following the `U+2029`
 Paragraph Separator marker. The Unicode Bidirectional Algorithm (UBA) is run
@@ -223,7 +223,7 @@ The end result of segmentation is thus a list of segments, each with its
 own glyph run (which may be reused across multiple segments) and its own
 list of sub-segments.
 
-#### 3. Layouting.
+#### 3. Layouting
 
 Layouting is the process of fitting and aligning the list of shaped segments
 inside a box. First word wrapping is performed on the segments, in logical
@@ -237,7 +237,7 @@ A list of segments can be laid out multiple times for different box dimensions
 and alignments in O(n). Changing `segments.lines.x` and `segments.lines.y`
 can also be done without re-layouting.
 
-#### 4. Rendering.
+#### 4. Rendering
 
 Rendering is the process of rasterizing the glyphs of the glyph runs
 individually and then blitting the resulting bitmaps onto a raster surface
