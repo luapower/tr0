@@ -122,7 +122,8 @@ input in general).
 Shape a text tree (flattened or not) into a list of segments.
 
 The segments can be laid out multiple times and must be laid out at least
-once in order to be rendered.
+once in order to be rendered. Changing the text tree in any way except
+for styling attributes (color) requires reshaping and relayouting.
 
 ### `segments:layout(x, y, w, h, [halign], [valign]) -> segments`
 
@@ -154,7 +155,8 @@ that.
 
 ### `tr:textbox(text_tree, cr, x, y, w, h, [halign], [valign]) -> segments`
 
-Shape, layout and paint text. Return segments.
+Shape, layout and paint text in one call. Return segments so that
+layouting or painting can be done again without reshaping.
 
 ## Rendering stages
 
