@@ -70,8 +70,7 @@ inherited from parent nodes and can be overriden in child nodes.
 
 Attributes can be:
 
-  * `font_name`: font name in the format `'family [weight] [slant][, size]'`
-  (parsed by `tr_font_db.lua`).
+  * `font` or `font_name`: font specified as `'family [weight] [slant][, size]'`.
   * `font_size`: font size override.
   * `font_weight`: font weight override: `'bold'`, `'thin'` etc. or a weight
   number between `100` and `900`.

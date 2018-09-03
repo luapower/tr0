@@ -518,6 +518,7 @@ function tr:flatten(text_tree)
 
 		--resolve `font` and `font_size`.
 		local font_name = run.font_name
+			or type(run.font) == 'string' and run.font or nil
 		local weight = (run.bold or run.b) and 'bold' or run.font_weight
 		local slant = (run.italic or run.i) and 'italic' or run.font_slant
 		local font_size = run.font_size
