@@ -901,8 +901,6 @@ function tr:shape(text_runs)
 					local next_sub_offset = glyph_run.cursor_offsets[next_sub_offset]
 					local sub_len = next_sub_offset - sub_offset
 
-					print((i+1)/2, sub_offset, sub_len, next_sub_offset)
-
 					if sub_len == 0 then
 						break
 					end
