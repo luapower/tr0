@@ -47,6 +47,7 @@ __selections__
 ### `tr:add_font_file(file, name, [slant], [weight])`
 
 Register a font file, associating it with a name, slant and weight.
+Registering fonts is mandatory.
 
 Multiple combinations of (name, weight, slant) can be registered with the
 same font. See [freetype] for supported font formats.
