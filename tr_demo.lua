@@ -140,10 +140,10 @@ function win:repaint()
 			paragraph_spacing = 1.5,
 			color = '#fff',
 			--{'A'},
-			font_name = 'amiri,100',
+			--font_name = 'amiri,100',
 			--font_name = 'eb garamond, 50',
 
-			font_ame = 'IonIcons,100',
+			font_name = 'IonIcons,100',
 			'\xEF\x8B\x80',
 			'\u{f12a}',
 
@@ -177,10 +177,8 @@ function win:repaint()
 
 				--'abc    def       ghi   123   xxx',
 
-				features = 'smcp liga=1 +kern',
+				--features = 'smcp liga=1 +kern',
 
-				--{'f'},{color = '#ff0','f'},{'i'},
-				--'Td', 'fb\n',
 				--{'Td'}, {color = '#ff0', 'f'}, {color = '#0ff', 'f'}, {color = '#f0f', 'i'}, {'b\n'}, 'abc def ghi',
 				--' abc',
 				--'abc', {'def\n'}, 'ABC 123',

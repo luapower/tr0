@@ -95,12 +95,10 @@ function cairo_rs:paint_glyph(cr, glyph, x, y, clip_left, clip_right)
 	local paint = glyph.paint
 	if not paint then return end
 	if clip_left or clip_right then
-		clip_left = clip_left or 0
-		clip_right = clip_right or 0
 		cr:save()
 		cr:new_path()
-		local x1 = x + clip_left
-		local x2 = x + glyph.bitmap.width + clip_right
+		local x1 = x + (clip_left or 0)
+		local x2 = x + glyph.bitmap.width + (clip_right or 0)
 		cr:rectangle(x1, y, x2 - x1, glyph.bitmap.rows)
 		cr:clip()
 		paint(self, cr, glyph, x, y)

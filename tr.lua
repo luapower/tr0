@@ -261,9 +261,6 @@ function tr:shape_text_run(
 	local glyph_info  = hb_buf:get_glyph_infos()
 	local glyph_pos   = hb_buf:get_glyph_positions()
 
-
-	print(str[str_offset], glyph_info[0].codepoint)
-
 	--make the advance of each glyph relative to the start of the run
 	--so that pos_x() is O(1) for any index.
 	--also compute the run's total advance.
@@ -888,7 +885,7 @@ function tr:shape(text_runs)
 				local last_sub_len = seg_len - sub_offset
 				local sub_offset = 0
 				local glyph_i = 0
-				local clip_left, clip_right = false, false
+				local clip_left, clip_right = false, false --from run's origin
 				for i = 1, substack_n + 1, 2 do
 					local sub_len, sub_text_run
 					if i < substack_n  then
@@ -1235,6 +1232,7 @@ end
 
 --painting -------------------------------------------------------------------
 
+--NOTE: clip_left and clip_right are relative to glyph run's origin.
 function segments:paint_glyph_run(cr, rs, run, i, j, ax, ay, clip_left, clip_right)
 	for i = i, j do
 
