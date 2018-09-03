@@ -37,6 +37,7 @@ gfont'open sans bold italic'
 gfont'open sans 300'
 gfont'open sans 300 italic'
 font'media/fonts/NotoColorEmoji.ttf'
+font'media/fonts/IonIcons.ttf'
 --font'media/fonts/NotoEmoji-Regular.ttf'
 --font'media/fonts/EmojiSymbols-Regular.ttf'
 --font'media/fonts/SubwayTicker.ttf'
@@ -142,6 +143,10 @@ function win:repaint()
 			font_name = 'amiri,100',
 			--font_name = 'eb garamond, 50',
 
+			font_ame = 'IonIcons,100',
+			'\xEF\x8B\x80',
+			'\u{f12a}',
+
 			--'abc', 'def', 'ghi',
 
 			--'mff\n12',
@@ -153,7 +158,6 @@ function win:repaint()
 
 			--'مفاتيح ABC DEF\n',
 			--dir = 'rtl',
-			'     ABC DEF.    ABC DEF.',
 			--'ABC DEF السَّلَامُ عَلَيْكُمْ مفاتيح ',
 			--'السَّلَامُ عَلَيْكُمْ',
 

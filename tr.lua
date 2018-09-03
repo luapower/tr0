@@ -261,6 +261,9 @@ function tr:shape_text_run(
 	local glyph_info  = hb_buf:get_glyph_infos()
 	local glyph_pos   = hb_buf:get_glyph_positions()
 
+
+	print(str[str_offset], glyph_info[0].codepoint)
+
 	--make the advance of each glyph relative to the start of the run
 	--so that pos_x() is O(1) for any index.
 	--also compute the run's total advance.
@@ -1246,30 +1249,11 @@ function segments:paint_glyph_run(cr, rs, run, i, j, ax, ay, clip_left, clip_rig
 			ay - oy
 		)
 
-		if clip_left or clip_right then
-			local x = bmpx
-			local y = bmpy
-			local w = glyph.bitmap.width
-			local h = glyph.bitmap.rows
-			local bmpw = w
-			if clip_left then
-				local dx = clip_left + ax - bmpx
-				x = x + dx
-				w = w - dx
-			end
-			if clip_right then
-				local dx = bmpw - (clip_right + ax - bmpx)
-				w = w - dx
-			end
-			cr:save()
-			cr:new_path()
-			cr:rectangle(x, y, w, h)
-			cr:clip()
-			rs:paint_glyph(cr, glyph, bmpx, bmpy)
-			cr:restore()
-		else
-			rs:paint_glyph(cr, glyph, bmpx, bmpy)
-		end
+		--make clip_left and clip_right relative to bitmap's left edge.
+		clip_left = clip_left and clip_left + ax - bmpx
+		clip_right = clip_right and clip_right + ax - bmpx
+
+		rs:paint_glyph(cr, glyph, bmpx, bmpy, clip_left, clip_right)
 	end
 end
 
@@ -1291,7 +1275,7 @@ function segments:paint(cr)
 				for i = 1, #seg, 5 do
 					local i, j, text_run, clip_left, clip_right = unpack(seg, i, i + 4)
 					rs:setcontext(cr, text_run)
-					self:paint_glyph_run(cr, rs, run, i, j, x, y, text_run, clip_left, clip_right)
+					self:paint_glyph_run(cr, rs, run, i, j, x, y, clip_left, clip_right)
 				end
 			else
 				rs:setcontext(cr, seg.text_run)
