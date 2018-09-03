@@ -75,9 +75,9 @@ Attributes can be:
   * `font_weight`: font weight override: `'bold'`, `'thin'` etc. or a weight
   number between `100` and `900`.
   * `font_slant`: font slant override: `'italic'`, `'normal'`.
-  * `bold`, `b`, `italic`, `i`: `font_weight` and `font_slant` overrides.
-  * `features`: a list of OpenType features in string form, eg.
-  `'+kern -liga smcp'`
+  * `bold`, `b`, `italic`, `i`: boolean `font_weight` and `font_slant` overrides.
+  * `features`: OpenType features specified as `'[+|-]feat[=val] ...'`,
+  eg. `'+kern -liga smcp'`.
   * `script`: an [ISO-15924] script tag (the default is auto-detected).
   * `lang`: a [BCP-47] language-country code (the default is auto-detected).
   * `dir`: `'ltr'`, `'rtl'`, `'auto'`: bidi direction for current and
