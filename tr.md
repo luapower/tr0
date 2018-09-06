@@ -8,9 +8,9 @@ exclusively for pixel-perfect consistent output across platforms. Uses
 Used by [ui] for all text rendering.
 
 Supports subpixel positioning, color bitmap fonts (emoticons!), word
-wrapping, alignments, hit testing, clipping, cursors, selections,
-control over OpenType features, cursors and coloring inside ligatures,
-OpenType-assisted auto-hinter.
+wrapping, alignments, hit testing, clipping, cursors, selections, editing,
+control over OpenType features, cursors, coloring and editing inside
+ligatures, OpenType-assisted auto-hinter.
 
 Not-yet implemented: full justification, subscript, superscript, underline,
 strikethrough, glyph substitution, shaping across words, hyphenation,
@@ -39,17 +39,25 @@ __cursors__
 `cursor:pos() -> x, y`                               cursor position
 `cursor:size() -> w, h, rtl`                         cursor size and direction
 `cursor:set_offset(offset)`                          move cursor to text offset
-`cursor:hit_test(x, y, ...) -> off, seg, i, line_i`  hit test
+`cursor:hit_test(x, y, ...) -> off, seg, i, line_i`  hit test for cursor position
 `cursor:move_to_offset(offset)`                      move cursor to closest offset in text
 `cursor:move_to_pos(x, y, ...)`                      move cursor to closest position
 `cursor:next_cursor([delta]) -> off, seg, i, line_i` next/prev cursor in text
 `cursor:move(dir[, delta])`                          move cursor in text
 __selections__
 `segs:selection() -> sel`                            create a selection
-`sel:rectangles(write_func)`                         get selection rectangles
+`sel:rectangles(write_func, ...)`                    get selection rectangles
+`sel:hit_test(x, y) -> true|false`                   hit test the selection rectangles
 `sel:select_all()`                                   select all
-`sel:reset([offset])`                                select none
-`sel.cursor1`, `sel.cursor2`                         selection ends
+`sel:reset()`                                        select none
+`sel:cursors() -> c1, c2`                            selection cursors in text-order
+`sel:empty() -> true|false`                          check if selection is empty
+__editing__
+`sel:codepoints() -> buf, offset, len`               selected text in utf-32 buffer
+`sel:string() -> s`                                  selected text as utf-8 string
+`sel:insert(s)`                                      replace selection with utf-8 text
+`sel:insert(buf, len, [charset])`                    replace selection with utf-8 or utf-32 text
+`sel:remove()`                                       remove selected text
 ---------------------------------------------------- ------------------------------------
 
 ### `tr:add_font_file(file, name, [slant], [weight])`
