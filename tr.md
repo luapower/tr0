@@ -9,8 +9,8 @@ Used by [ui] for all text rendering.
 
 Supports subpixel positioning, color bitmap fonts (emoticons!), word
 wrapping, alignments, hit testing, clipping, cursors, selections, editing,
-control over OpenType features, cursors, coloring and editing inside
-ligatures, OpenType-assisted auto-hinter.
+control over OpenType features, coloring and editing inside ligatures,
+OpenType-assisted auto-hinter.
 
 Not-yet implemented: full justification, subscript, superscript, underline,
 strikethrough, glyph substitution, shaping across words, hyphenation,
