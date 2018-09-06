@@ -55,9 +55,9 @@ __selections__
 __editing__
 `sel:codepoints() -> buf, offset, len`               selected text in utf-32 buffer
 `sel:string() -> s`                                  selected text as utf-8 string
-`sel:insert(s)`                                      replace selection with utf-8 text
-`sel:insert(buf, len, [charset])`                    replace selection with utf-8 or utf-32 text
-`sel:remove()`                                       remove selected text
+`sel:insert(s[, nil, charset]) -> offset`            replace selection with text from string
+`sel:insert(s|buf, len, [charset]) -> offset`        replace selection with text from buffer
+`sel:remove() -> offset`                             remove selected text
 ---------------------------------------------------- ------------------------------------
 
 ### `tr:add_font_file(file, name, [slant], [weight])`
