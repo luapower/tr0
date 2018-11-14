@@ -202,7 +202,7 @@ Once the text is aligned, it can be painted many times with `paint()`.
 
 ### `segs:layout(x, y, [w], [h], [align_x], [align_y]) -> segs`
 
-Layout, i.e. wrap and align shaped text.
+Wrap and align shaped text.
 
 ### `segs:bounding_box() -> x, y, w, h`
 
