@@ -204,6 +204,10 @@ Once the text is aligned, it can be painted many times with `paint()`.
 
 Layout, i.e. wrap and align shaped text.
 
+### `segs:bounding_box() -> x, y, w, h`
+
+Return the bounding-box of laid out text.
+
 ### `segs:paint(cr)`
 
 Paint the shaped and laid out text into a graphics context.
