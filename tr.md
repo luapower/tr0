@@ -324,11 +324,9 @@ based on the current cursor position. Possible argument combinations:
 `'next_page',           [pages_away], [x], ...`  position some pages away from the cursor
 ------------------------------------------------ -----------------------------
 
-In the above table, `...` are extra optional boolean args, which all default to `true`:
-
-  * `[extend_top], [extend_bottom], [extend_left], [extend_right], [park_bos], [park_eos]`
-
-and mean:
+In the above table, `...` mean `[extend_top], [extend_bottom], [extend_left],
+[extend_right], [park_bos], [park_eos]` which are extra optional boolean args
+which all default to `true`, and mean:
 
   * `extend_<side>`: if outside this side of the text, consider the point inside.
   * `park_bos`: if above the top side of the text, return the first logical cursor.
