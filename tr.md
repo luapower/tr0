@@ -326,7 +326,8 @@ based on the current cursor position. Possible argument combinations:
 
 In the table above:
 
-  * `*_away` describes a relative position and can be negative or positive.
+  * `*_away` describes a relative position and can be negative or positive
+  and defaults to `1`.
   * `[x]` is an optional cursor x-coord and defaults to the current x-coord.
   * `...` means `[extend_top], [extend_bottom], [extend_left],
 [extend_right], [park_bos], [park_eos]` which are extra optional boolean args
