@@ -324,6 +324,7 @@ based on the current cursor position. Possible argument combinations:
 
 Some of the above arguments mean:
 
+  * `*_away`: number (`1`): indicates a relative position and can be positive or negative.
   * `extend_*`: boolean (`true`): if the point exceeds this side of the lines, consider the point inside.
   * `park_bos`: boolean (`true`): if line number < 1, return the first visual cursor.
   * `park_eos`: boolean (`true`): if line number > number of lines, return the last visual cursor.
