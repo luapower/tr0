@@ -311,16 +311,22 @@ Get cursor line object and the lines array.
 Find a cursor position based on passed args and, for some values of `what`,
 based on the current cursor position. Possible argument combinations:
 
-  * `'pos', x, y, [extend_top], [extend_bottom], [extend_left], [extend_right]` - position at coords (hit test)
-  * `'offset'` - position at offset in text
-  * `'next_pos', [delta]` - position some visual positions away
-  * `'next_offset', [delta]` - position some text positions away
-  * `'next_pos_and_offset', [delta]` - position some visual/text positions away
-  * `'next_word', [delta]` - position some segments away
-  * `'line', line_num, [x], [park_bos], [park_eos]` - position on a specific line
-  * `'next_line', [lines_away], [x], [park_bos], [park_eos]` - position some lines away from the cursor
-  * `'page', page_num, [x], [extend_top], [extend_bottom], [extend_left], [extend_right]` - position at the first line of a specific page
-  * `'next_page', [pages_away], [x], [extend_top], [extend_bottom], [extend_left], [extend_right]` - position some pages away from the cursor
+  * `'pos', x, y, [extend_top], [extend_bottom], [extend_left], [extend_right]`:  position at coords (hit test)
+  * `'offset'`:  position at offset in text
+  * `'next_pos', [positions_away]`:  position some visual positions away
+  * `'next_offset', [positions_away]`:  position some text positions away
+  * `'next_pos_and_offset', [positions_away]`:  position some visual/text positions away
+  * `'next_word', [words_away]`:  position some words away
+  * `'line', line_num, [x], [extend_left], [extend_right], [park_bos], [park_eos]`:  position on a specific line
+  * `'next_line', [lines_away], [x], [extend_left], [extend_right], [park_bos], [park_eos]`:  position some lines away from the cursor
+  * `'page', page_num, [x], [extend_top], [extend_bottom], [extend_left], [extend_right]`:  position at the first line of a specific page
+  * `'next_page', [pages_away], [x], [extend_top], [extend_bottom], [extend_left], [extend_right]`:  position some pages away from the cursor
+
+Some of the above arguments mean:
+
+  * `extend_*`: boolean (`true`): if the point exceeds this side of the lines, consider the point inside.
+  * `park_bos`: boolean (`true`): if line number < 1, return the first visual cursor.
+  * `park_eos`: boolean (`true`): if line number > number of lines, return the last visual cursor.
 
 ### `cursor:move(what, ...) -> changed`
 
