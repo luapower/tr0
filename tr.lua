@@ -1647,6 +1647,7 @@ function segments:hit_test_line(line_i, x,
 		x = 1/0
 	end
 	local lines = self:checklines()
+	local line_i = clamp(line_i, 1, #lines)
 	local line = lines[line_i]
 	local x = x - lines.x - line.x
 	--TODO: use binsearch here.
