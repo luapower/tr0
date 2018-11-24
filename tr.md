@@ -308,25 +308,24 @@ Get cursor line object and the lines array.
 
 ### `cursor:find(what, ...) -> seg, i`
 
-Find a cursor position based on passed args and, for some values of `what`
+Find a cursor position based on passed args and, for some values of `what`,
 based on the current cursor position. Possible argument combinations:
 
-  * `'pos', x, y, [extend_top], [extend_bottom], [extend_left], [extend_right]` - at coords
-  * `'offset'` - at offset in text
-  * `'next_pos', [delta]` - visual positions away
-  * `'next_offset', [delta]` - text positions away
-  * `'next_pos_and_offset', [delta]` - visual and text positions away
-  * `'next_word', [delta]` - segments away
-  * `'line', line_num, [x], [park_bos], [park_eos]` - on a specific line
-  * `'next_line', [lines_away], [x], [park_bos], [park_eos]` - lines away
-  * `'page', page_num, [x], [extend_top], [extend_bottom], [extend_left], [extend_right]` - at the first line of a specific page
-  * `'next_page', [pages_away], [x], [extend_top], [extend_bottom], [extend_left], [extend_right]` - pages away
+  * `'pos', x, y, [extend_top], [extend_bottom], [extend_left], [extend_right]` - position at coords (hit test)
+  * `'offset'` - position at offset in text
+  * `'next_pos', [delta]` - position some visual positions away
+  * `'next_offset', [delta]` - position some text positions away
+  * `'next_pos_and_offset', [delta]` - position some visual/text positions away
+  * `'next_word', [delta]` - position some segments away
+  * `'line', line_num, [x], [park_bos], [park_eos]` - position on a specific line
+  * `'next_line', [lines_away], [x], [park_bos], [park_eos]` - position some lines away from the cursor
+  * `'page', page_num, [x], [extend_top], [extend_bottom], [extend_left], [extend_right]` - position at the first line of a specific page
+  * `'next_page', [pages_away], [x], [extend_top], [extend_bottom], [extend_left], [extend_right]` - position some pages away from the cursor
 
 ### `cursor:move(what, ...) -> changed`
 
-Move the cursor to a new position. Implemented as:
-
-	return self:set(self:find(what, ...))
+Move the cursor to a new position. Implemented as
+`return self:set(self:find(what, ...))`.
 
 ### `cursor:changed()`
 
