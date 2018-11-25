@@ -1723,10 +1723,13 @@ function segments:cursor_at_offset(offset, which)
 
 	--there can be more than one cursor for the same offset: `which` controls
 	--which cursor needs to be returned: the first or the last.
-	while which do
-		local delta = assert(which == 'last' and 1 or which == 'first' and -1)
-		local seg1, i1, delta = self:next_cursor(seg, i, delta, 'pos')
-		if delta == 0 and self:offset_at_cursor(seg1, i1) == self:offset_at_cursor(seg, i) then
+	local which = which or 'first'
+	local delta = assert(which == 'last' and 1 or which == 'first' and -1)
+	while true do
+		local seg1, i1, delta_left = self:next_cursor(seg, i, delta)
+		if delta_left == 0
+			and self:offset_at_cursor(seg1, i1) == self:offset_at_cursor(seg, i)
+		then
 			seg, i = seg1, i1
 		else
 			break
@@ -1768,7 +1771,7 @@ end
 --defined as a distinct consecutive cursor position and distinctiveness
 --is tested using a custom comparison function.
 function segments:next_cursor(cseg, ci, delta, cmp)
-	cmp = assert(self.cmp_cursors[cmp] or cmp)
+	cmp = cmp and assert(self.cmp_cursors[cmp] or cmp)
 	delta = floor(delta or 1) --prevent infinite loop with `delta ~= 0`
 	local step = delta > 0 and 1 or -1
 	local len = cseg.glyph_run.text_len
@@ -1784,7 +1787,7 @@ function segments:next_cursor(cseg, ci, delta, cmp)
 		end
 		assert(i >= 0)
 		assert(i <= len)
-		if cmp(self, seg, i, cseg, ci) then
+		if not cmp or cmp(self, seg, i, cseg, ci) then
 			delta = delta - step
 		end
 		cseg, ci = seg, i

@@ -319,7 +319,7 @@ Get cursor line object and the lines array.
 Find a cursor position. Possible argument combinations:
 
 ------------------------------------------------ -----------------------------
-`'offset',              'first'|'last'        `  position at offset in text
+`'offset',              ['first'|'last']      `  position at offset in text
 `'next_pos',            [positions_away]      `  position some visual positions away
 `'next_offset',         [positions_away]      `  position some text positions away
 `'next_pos_and_offset', [positions_away]      `  position some visual/text positions away
