@@ -379,9 +379,10 @@ Select the word around `cursor1`.
 
 Get the selection rectangles.
 
-### `sel:hit_test(x, y) -> true|false`
+### `sel:hit_test(x, y, ...) -> true|false`
 
-Hit test the selection rectangles.
+Hit test the selection rectangles. Extra args are the same as for
+`find('pos', ...)`.
 
 ## Editing
 
