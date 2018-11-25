@@ -278,7 +278,7 @@ layouting or painting can be done again without reshaping.
 ### `segs:hit_test(x, y, ...) -> seg, i`
 
 Hit test for a cursor position. Extra args are the same as for
-`find('pos', ...)`.
+`cursor:find('pos', ...)`.
 
 ## Cursors
 
