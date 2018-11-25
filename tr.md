@@ -273,6 +273,13 @@ Mark all lines and segments as visible.
 Shape, layout and paint text in one call. Return segments so that
 layouting or painting can be done again without reshaping.
 
+## Hit testing
+
+### `segs:hit_test(x, y, ...) -> seg, i`
+
+Hit test for a cursor position. Extra args are the same as for
+`find('pos', ...)`.
+
 ## Cursors
 
 ### `segs:cursor([offset]) -> cursor`
@@ -379,10 +386,9 @@ Select the word around `cursor1`.
 
 Get the selection rectangles.
 
-### `sel:hit_test(x, y, ...) -> true|false`
+### `sel:hit_test(x, y) -> true|false`
 
-Hit test the selection rectangles. Extra args are the same as for
-`find('pos', ...)`.
+Hit test the selection rectangles.
 
 ## Editing
 
