@@ -1767,11 +1767,17 @@ function segments.cmp_cursors:pos_and_offset(seg1, i1, seg2, i2)
 		and self.cmp_cursors:offset(seg1, i1, seg2, i2)
 end
 
+--do not compare cursors: all cursors are considered unique.
+function segments.cmp_cursors:codepoint()
+	return true
+end
+
 --the cursor that is `delta` steps away from a cursor, whereby a step is
 --defined as a distinct consecutive cursor position and distinctiveness
 --is tested using a custom comparison function.
 function segments:next_cursor(cseg, ci, delta, cmp)
-	cmp = cmp and assert(self.cmp_cursors[cmp] or cmp)
+	cmp = cmp or 'codepoint'
+	cmp = assert(self.cmp_cursors[cmp] or cmp)
 	delta = floor(delta or 1) --prevent infinite loop with `delta ~= 0`
 	local step = delta > 0 and 1 or -1
 	local len = cseg.glyph_run.text_len
@@ -1787,7 +1793,7 @@ function segments:next_cursor(cseg, ci, delta, cmp)
 		end
 		assert(i >= 0)
 		assert(i <= len)
-		if not cmp or cmp(self, seg, i, cseg, ci) then
+		if cmp(self, seg, i, cseg, ci) then
 			delta = delta - step
 		end
 		cseg, ci = seg, i
@@ -2128,6 +2134,8 @@ function cursor:find(what, ...)
 		return self.segments:next_cursor(self.seg, self.i, ..., 'offset')
 	elseif what == 'next_pos_and_offset' then
 		return self:next_cursor(self.seg, self.i, ..., 'pos_and_offset')
+	elseif what == 'next_codepoint' then
+		return self:next_cursor(self.seg, self.i, ..., 'codepoint')
 	elseif what == 'next_word' then
 		return self.segments:next_word(self.seg, self.i, ...)
 	elseif what == 'line' then

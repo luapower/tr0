@@ -323,6 +323,7 @@ Find a cursor position. Possible argument combinations:
 `'next_pos',            [positions_away]      `  position some visual positions away
 `'next_offset',         [positions_away]      `  position some text positions away
 `'next_pos_and_offset', [positions_away]      `  position some visual/text positions away
+`'next_codepoint',      [codepoints_away]     `  position some codepoints away
 `'next_word',           [words_away]          `  position some words away
 `'pos',                 x, y,              ...`  position at coords (hit test)
 `'line',                line_num,     [x], ...`  position on a specific line
