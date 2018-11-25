@@ -1709,19 +1709,30 @@ end
 
 --cursor text hit-testing ----------------------------------------------------
 
---TODO: there can be more than one cursor for the same offset, this function
---returns one of them with no options to control which one.
 local function cmp_offsets(segments, i, offset)
 	return segments[i].offset <= offset -- < < = = [<] <
 end
-function segments:cursor_at_offset(offset)
+function segments:cursor_at_offset(offset, which)
 	local seg_i = (binsearch(offset, self, cmp_offsets) or #self + 1) - 1
 	local seg = self[seg_i]
 	local run = seg.glyph_run
 	local i = offset - seg.offset
 	assert(i >= 0)
 	local i = clamp(i, 0, run.text_len)
-	return seg, run.cursor_offsets[i]
+	local i = run.cursor_offsets[i]
+
+	--there can be more than one cursor for the same offset: `which` controls
+	--which cursor needs to be returned: the first or the last.
+	while which do
+		local delta = assert(which == 'last' and 1 or which == 'first' and -1)
+		local seg1, i1, delta = self:next_cursor(seg, i, delta, 'pos')
+		if delta == 0 and self:offset_at_cursor(seg1, i1) == self:offset_at_cursor(seg, i) then
+			seg, i = seg1, i1
+		else
+			break
+		end
+	end
+	return seg, i
 end
 
 function segments:offset_at_cursor(seg, i)
@@ -2194,7 +2205,7 @@ function selection:offsets()
 	local c2 = self.cursor2
 	local o1 = c1.seg.offset + c1.i
 	local o2 = c2.seg.offset + c2.i
-	return min(o1, o2), max(o1, o2)
+	return min(o1, o2), max(o1, o2), o1 < o2
 end
 
 function selection:cursors()
@@ -2202,10 +2213,11 @@ function selection:cursors()
 	local c2 = self.cursor2
 	local o1 = c1.seg.offset + c1.i
 	local o2 = c2.seg.offset + c2.i
-	if o1 > o2 then
-		return c2, c1
+	local fw = o1 < o2
+	if fw then
+		return c1, c2, fw
 	else
-		return c1, c2
+		return c2, c1, fw
 	end
 end
 
@@ -2274,8 +2286,9 @@ function selection:remove() --remove selected text.
 	local i1, i2 = self:offsets()
 	local offset, changed = self.segments:remove(i1, i2)
 	if changed then
-		local c1, c2 = self:cursors()
-		c1:move('offset', offset) --same offset, but we need to reset c1.seg!
+		local c1, c2, forward = self:cursors()
+		--same offset, but we need to reset c1.seg!
+		c1:move('offset', offset, forward and 'first' or 'last')
 		c2:set(c1)
 	end
 	return changed
