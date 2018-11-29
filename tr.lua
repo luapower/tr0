@@ -466,6 +466,7 @@ function tr:shape_word(
 		cursor_offsets = cursor_offsets, --0..text_len
 		cursor_xs = cursor_xs, --0..text_len
 		rtl = rtl,
+		trailing_space = trailing_space,
 	}, self.glyph_run_class)
 
 	return glyph_run
@@ -971,7 +972,6 @@ function tr:shape(text_runs, segments)
 						text_run = text_run, --text run of the last sub-segment
 						offset = seg_offset,
 						index = seg_count,
-						trailing_space = trailing_space,
 						--slots filled by layouting
 						x = false, advance_x = false, --segment's x-axis boundaries
 						next = false, --next segment on the same line in text order
@@ -1571,15 +1571,14 @@ end
 
 function segments:cursor_rect(seg, i, w) --relative to line_pos().
 	local line = seg.line
-	local rtl = seg.glyph_run.rtl
 	local x = self:cursor_x(seg, i)
 	local y = -line.ascent
-	local w = (rtl and -1 or 1) * (w or 1)
+	local w = (seg.glyph_run.rtl and -1 or 1) * (w or 1)
 	local h = line.ascent - line.descent
 	if w < 0 then
 		x, w = x + w, -w
 	end
-	return x, y, w, h, rtl
+	return x, y, w, h
 end
 
 --iterate all visually-unique cursor positions in visual order.
@@ -1607,85 +1606,66 @@ function segments:cursor_xs()
 	end)
 end
 
---next/prev unfiltered cursor position.
-function segments:rel_physical_cursor(seg, i, dir)
+--next/prev valid cursor position.
+function segments:rel_physical_cursor(seg, i, dir, valid, obj, ...)
 	dir = dir or 'next'
-	if dir == 'next' then
-		if i > seg.glyph_run.text_len then
-			seg = self[seg.index + 1]
-			if not seg then return nil end
-			return seg, 0
-		else
-			return seg, i+1
-		end
-	elseif dir == 'prev' then
-		if i < 0 then
-			seg = self[seg.index - 1]
-			if not seg then return nil end
-			return seg, seg.glyph_run.text_len
-		else
-			return seg, i-1
-		end
-	else
-		assert(false)
-	end
-end
-
---next/prev cursor position filtered by cmp(seg, i, seg0, i0, ...).
---cmp() must return true if (seg, i) is both valid and not a duplicate
---of (seg0, i0) which is the previous cursor position in logical order.
---`dir` controls which distinct cursor to return. `which` controls which
---non-distinct cursor to return once a distinct cursor was found.
-local function call_cmp(forward, cmp, obj, seg1, i1, seg, i, ...)
-	if forward then
-		return cmp(obj, seg1, i1, seg, i, ...)
-	else
-		return cmp(obj, seg, i, seg1, i1, ...)
-	end
-end
-local function fw_args(forward, arg1, arg2)
-	if forward then
-		return arg1, arg2
-	else
-		return arg2, arg1
-	end
-end
-function segments:rel_cursor(seg, i, dir, which, cmp, obj, ...)
-	dir = dir or 'this' --'next', 'prev', 'this'
-	which = which or 'first' --'first', 'last'
-	if dir == 'next' or dir == 'prev' then --find prev/next distinct
-		local fw = dir == 'next'
-		local seg1, i1 = self:rel_physical_cursor(seg, i, dir)
-		if not seg1 then --bos/eos
-			return nil
-		elseif not cmp then --no filter
-			return seg1, i1
-		elseif not call_cmp(fw, cmp, obj, seg1, i1, seg, i, ...) then --non-distinct
-			return self:rel_cursor(seg1, i1, dir, which, cmp, obj, ...)
-		end
-		local first, last = fw_args(fw, 'first', 'last')
-		if which == first then
-			return seg1, i1
-		elseif which == last then
-			return segments:rel_cursor(seg1, i1, 'this', last, cmp, obj, ...)
+	repeat
+		if dir == 'next' then
+			if i >= seg.glyph_run.text_len then
+				seg = self[seg.index + 1]
+				if not seg then return nil end
+				i = 0
+			else
+				i = i+1
+			end
+		elseif dir == 'prev' then
+			if i <= 0 then
+				seg = self[seg.index - 1]
+				if not seg then return nil end
+				i = seg.glyph_run.text_len
+			else
+				i = i-1
+			end
 		else
 			assert(false)
 		end
-	elseif dir == 'this' then --find first/last non-distinct
-		assert(which == 'last' or which == 'first')
-		local fw = which == 'last'
-		if not cmp then --no filter
+	until (not valid or valid(obj, seg, i, ...))
+	return seg, i
+end
+
+--next/prev cursor position filtered by a is-different-than-other-position
+--question and a is-valid-position question.
+--`dir` controls which distinct cursor to return. `which` controls which
+--non-distinct cursor to return once a distinct cursor was found.
+function segments:rel_cursor(seg, i, dir, which, diff, valid, obj, ...)
+	dir = dir or 'this' --'next', 'prev', 'this'
+	which = which or 'first' --'first', 'last'
+	assert(which == 'last' or which == 'first')
+	if dir == 'next' or dir == 'prev' then --find prev/next distinct
+		::again::
+		local seg1, i1 = self:rel_physical_cursor(seg, i, dir, valid, obj, ...)
+		if not seg1 then --bos/eos
+			return nil
+		elseif diff and not diff(obj, seg1, i1, seg, i, ...) then
+			seg, i = seg1, i1
+			goto again
+		elseif which == (dir == 'next' and 'first' or 'last') then --already there
+			return seg1, i1
+		end
+		local last = dir == 'next' and 'last' or 'first'
+		return self:rel_cursor(seg1, i1, 'this', last, diff, valid, obj, ...)
+	elseif dir == 'this' then --find first/last non-distinct position
+		if not diff then
 			return seg, i
 		end
-		local prev, next = fw_args(fw, 'prev', 'next')
-		local seg1, i1 = self:rel_physical_cursor(seg, i, next)
+		local dir = which == 'first' and 'prev' or 'next'
+		local seg1, i1 = self:rel_physical_cursor(seg, i, dir, valid, obj, ...)
 		if not seg1 then --bos/eos
 			return seg, i
-		elseif call_cmp(fw, cmp, obj, seg1, i1, seg, i, ...) then --distinct
+		elseif diff(obj, seg1, i1, seg, i, ...) then --distinct position
 			return seg, i
-		else --non-distinct
-			return self:rel_cursor(seg1, i1, 'this', last, cmp, obj, ...)
 		end
+		return self:rel_cursor(seg1, i1, 'this', which, diff, valid, obj, ...)
 	else
 		assert(false)
 	end
@@ -1705,7 +1685,7 @@ function segments:hit_test_lines(y)
 end
 
 --hit-test a line for a cursor position given a line number and an x-coord.
-function segments:hit_test_cursors(line_i, x, cmp, obj, ...)
+function segments:hit_test_cursors(line_i, x, diff, valid, obj, ...)
 	local lines = self:checklines()
 	local line_i = clamp(line_i, 1, #lines)
 	local line = lines[line_i]
@@ -1718,16 +1698,14 @@ function segments:hit_test_cursors(line_i, x, cmp, obj, ...)
 	while seg do
 		local run = seg.glyph_run
 		local x = x - seg.x
-		for i = 0, run.text_len do
-			local d = math.abs(run.cursor_xs[i] - x)
-			if d < min_d and (
-				not seg0 --bos/eos
-				or not cmp --not filtered
-				or cmp(obj, seg, i, seg0, i0, ...)
-			) then
-				min_d = d
-				cseg, ci = seg, i
-			end
+		local d = math.abs(run.cursor_xs[i] - x)
+		if not seg0
+			or (d < min_d
+				and (not valid or valid(obj, seg, i, ...))
+				and (not diff or diff(obj, seg, i, seg0, i0, ...)))
+		then
+			min_d = d
+			cseg, ci = seg, i
 		end
 		seg0, i0 = seg, i
 		i = i + 1
@@ -2014,12 +1992,22 @@ end
 local cursor = {}
 tr.cursor_class = cursor
 
-cursor.park_bos = false
-cursor.park_eos = false
-cursor.unique_offsets = false --show text-duplicate cursors, unlike most editors
-cursor.unique_positions = false --show visually-duplicate cursors
-cursor.wrapped_space = false --hide possibly-clipped cursor after wrapped space
-cursor.insert_mode = false --full-width rect
+--park cursor to home/end if vertical nav goes above/beyond available lines.
+cursor.park_home = true
+cursor.park_end = true
+
+--jump-through same-text-offset cursors: most text editors remove duplicate
+--cursors to keep a 1:1 relationship between text positions and cursor
+--positions, which gets funny with BiDi and you also can't tell if there's
+--a space at the end of a wrapped line or not.
+cursor.unique_offsets = false
+
+--keep a cursor after the last space char on a wrapped line: this cursor can
+--be trouble because it is outside the textbox and if there's not enough room
+--on the wrap-side of the textbox it can get clipped out.
+cursor.wrapped_space = true
+
+cursor.insert_mode = false --full-width caret rect
 
 function segments:cursor(offset)
 	if #self == 0 then return end
@@ -2055,10 +2043,15 @@ function cursor:get()
 	return self.seg, self.i, self.x
 end
 
+function cursor:rtl()
+	return self.seg.glyph_run.rtl
+end
+
 function cursor:rect(w)
 	local x0, y0 = self.segments:line_pos(self.seg.line)
-	local x, y, w, h, rtl = self.segments:cursor_rect(self.seg, self.i, w)
+	local x, y, w, h = self.segments:cursor_rect(self.seg, self.i, w)
 	if self.insert_mode then
+		local rtl = self:rtl()
 		local seg1, i1 = self:find('rel_cursor', rtl and 'prev' or 'next')
 		if seg1.line == self.seg.line then
 			local x1 = self.segments:cursor_rect(seg1, i1)
@@ -2070,19 +2063,28 @@ function cursor:rect(w)
 			end
 		end
 	end
-	return x0 + x, y0 + y, w, h, rtl
+	return x0 + x, y0 + y, w, h
 end
 
-function cursor:filter(self, seg, i)
-	return true
+function cursor:valid(seg, i)
+	return not (
+		not self.wrapped_space
+		and seg.wrapped
+		and i == seg.glyph_run.len
+		and seg.glyph_run.trailing_space
+	)
 end
 
 function cursor:cmp(seg, i, seg0, i0, mode)
-	if not self:filter(seg, i) then
-		return
+	if not seg0 then
+		return true
 	end
 	local segs = self.segments
-	if not mode or mode == 'pos' then
+	local mode = mode or 'pos'
+	if mode == 'pos' and self.unique_offsets then
+		mode = 'char'
+	end
+	if mode == 'pos' then
 		return
 			seg.line ~= seg0.line
 			or segs:cursor_x(seg, i) ~= segs:cursor_x(seg0, i0)
@@ -2091,6 +2093,8 @@ function cursor:cmp(seg, i, seg0, i0, mode)
 		return segs:offset_at_cursor(seg, i) ~= segs:offset_at_cursor(seg0, i0)
 	elseif mode == 'word' then
 		return seg ~= seg0
+	elseif mode == 'line' then
+		return seg.line ~= seg0.line
 	else
 		assert(false)
 	end
@@ -2098,18 +2102,31 @@ end
 
 function cursor:find(what, ...)
 	if what == 'offset' then
-		local offset = ...
-		return self.segments:cursor_at_offset(offset)
+		local offset, which = ...
+		local seg, i = self.segments:cursor_at_offset(offset)
+		if which then
+			return self:find('cursor', seg, i, 'this', 'char', which)
+		else
+			return seg, i
+		end
 	elseif what == 'cursor' then
-		local seg, i, dir, which, mode = ...
-		return self.segments:rel_cursor(
-			seg, i, dir, which, self.cmp, self, mode)
+		local seg, i, dir, mode, which = ...
+		local seg1, i1 = self.segments:rel_cursor(seg, i, dir, which,
+			self.cmp, self.valid, self, mode)
+		return self.segments:rel_cursor(seg, i, dir, which,
+			self.cmp, self.valid, self, mode)
 	elseif what == 'rel_cursor' then
 		return self:find('cursor', self.seg, self.i, ...)
 	elseif what == 'line' then
 		local line_i, x = ...
 		x = x or self.x
-		return self.segments:hit_test_cursors(line_i, x, self.cmp, self)
+		if line_i < 1 and self.park_home then
+			return self:find('offset', 0)
+		elseif line_i > #self.segments.lines and self.park_end then
+			return self:find('offset', 1/0)
+		end
+		return self.segments:hit_test_cursors(line_i, x,
+			self.cmp, self.valid, self)
 	elseif what == 'rel_line' then
 		local delta_lines, x = ...
 		local line_i = self.seg.line.index + (delta_lines or 0)
@@ -2148,7 +2165,7 @@ function cursor:insert(...) --insert text at cursor.
 	local offset = self.seg.offset + self.i
 	local offset, changed = self.segments:insert(offset, ...)
 	if changed then
-		self:move('offset', offset)
+		self:move('offset', offset, 'first')
 	end
 	return changed
 end
@@ -2214,12 +2231,18 @@ function selection:select_all()
 end
 
 function selection:reset()
-	return self.cursor2:set(self.cursor1)
+	return self.cursor1:set(self.cursor2)
 end
 
 function selection:select_word()
-	local changed1 = self.cursor1:move('next_word', 0)
-	local changed2 = self.cursor2:move('next_word', 1)
+	local changed1 = self.cursor1:move('rel_cursor', 'this', 'word')
+	local changed2 = self.cursor2:move('rel_cursor', 'this', 'word', 'last')
+	return changed1 or changed2
+end
+
+function selection:select_line()
+	local changed1 = self.cursor1:move('rel_cursor', 'this', 'line')
+	local changed2 = self.cursor2:move('rel_cursor', 'next', 'line')
 	return changed1 or changed2
 end
 
@@ -2263,10 +2286,9 @@ function selection:remove() --remove selected text.
 	local offset1, offset2 = self:offsets()
 	local offset, changed = self.segments:remove(offset1, offset2)
 	if changed then
-		local c1, c2, forward = self:cursors()
-		c1:move('offset', offset) --same offset, but we need to reset c1.seg!
-		--TODO:
-		c1:move('next_pos', forward and 0 or .5)
+		local c1, c2 = self:cursors()
+		--same offset, but we need to reset c1.seg!
+		c1:move('offset', offset, 'first')
 		c2:set(c1)
 	end
 	return changed

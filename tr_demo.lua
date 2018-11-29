@@ -343,10 +343,10 @@ function win:keypress(key)
 		print(cursor.seg.index, cursor.i,
 			cursor.seg.glyph_run.cursor_xs[cursor.i], pp.format(t))
 	elseif key == 'up' then
-		cursor:move('next_line', -1)
+		cursor:move('rel_line', -1)
 		self:invalidate()
 	elseif key == 'down' then
-		cursor:move('next_line', 1)
+		cursor:move('rel_line', 1)
 		self:invalidate()
 	end
 end
