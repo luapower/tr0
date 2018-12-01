@@ -409,8 +409,9 @@ Selected text as utf-8 string.
 
 ### `sel:replace(s, [len], [charset], [maxlen]) -> t|f`
 
-Replace selection with text. The text is re-shaped, re-wrapped and re-aligned
-if it was previously aligned and the clip rectangle is invalidated.
+Replace selection with text. The text is re-shaped, re-wrapped (if it was
+previously wrapped), re-aligned (if it was previously aligned), and the clip
+rectangle (if any) is invalidated.
 
 ## Rendering stages
 
