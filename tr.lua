@@ -1457,10 +1457,10 @@ local function cmp_ys(lines, i, y)
 end
 local function line_at_y(y, lines)
 	if not lines[1] then
-		return nil
+		return nil --no lines
 	end
 	if y < -lines[1].spaced_ascent then
-		return 1
+		return 1 --above first line
 	end
 	return binsearch(y, lines, cmp_ys) or #lines
 end
