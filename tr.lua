@@ -1129,6 +1129,7 @@ function tr:shape(text_runs, segments)
 	--remove cached values.
 	segments._min_w = false
 	segments._max_w = false
+	segments.lines = false
 
 	return segments
 end
@@ -1364,7 +1365,7 @@ function segments:wrap(w)
 	lines.first_visible = 1
 	lines.last_visible = #lines
 
-	self._wrap_w = w --for reshape()
+	self.wrap_w = w --for reshape()
 
 	return self
 end
@@ -1419,10 +1420,12 @@ function segments:align(x, y, w, h, align_x, align_y)
 	lines.y = y
 
 	--store args for reshape().
-	self._w = w
-	self._h = h
-	self._ax = align_x
-	self._ay = align_y
+	self.x = x
+	self.y = y
+	self.w = w
+	self.h = h
+	self.align_x = align_x
+	self.align_y = align_y
 
 	if lines.clip_valid then
 		--must reset clip on paint() if clip() won't be called until paint().
@@ -1452,10 +1455,10 @@ end
 function segments:clip(x, y, w, h)
 	local lines = self:checklines()
 	if not x then
-		x = lines.x
-		y = lines.y
-		w = self._w
-		h = self._h
+		x = self.x
+		y = self.y
+		w = self.w
+		h = self.h
 	end
 	x = x - lines.x
 	y = y - lines.y - lines.baseline
@@ -1967,17 +1970,14 @@ end
 --editing text from segments which includes reshaping and relayouting.
 
 function segments:reshape()
-	local wrap_w, x, y, clipped, w, h, ha, va
-	local t = self.lines
-	if t then
-		wrap_w, x, y, w, h, ha, va =
-			self._wrap_w, t.x, t.y, self._w, self._h, self._ax, self._ay
-	end
+	local wrap_w = self.wrap_w
+	local x, y, w, h = self.x, self.y, self.w, self.h
+	local ax, ay = self.align_x, self.align_y
 	self.tr:shape(self.text_runs, self)
-	if t then
+	if wrap_w then
 		self:wrap(wrap_w)
 		if x then
-			self:align(x, y, w, h, ha, va)
+			self:align(x, y, w, h, ax, ay)
 		end
 	end
 	return self
