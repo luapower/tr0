@@ -1485,7 +1485,7 @@ function segments:clip(x, y, w, h)
 	return self
 end
 
-function tr:reset_clip()
+function segments:reset_clip()
 	return self:clip(-1/0, -1/0, 1/0, 1/0)
 end
 
@@ -1967,7 +1967,7 @@ end
 --editing text from segments which includes reshaping and relayouting.
 
 function segments:reshape()
-	local x, y, clipped, w, h, ha, va
+	local wrap_w, x, y, clipped, w, h, ha, va
 	local t = self.lines
 	if t then
 		wrap_w, x, y, w, h, ha, va =
