@@ -292,13 +292,10 @@ Returns `nil` if the segments table contain no segments.
 
 Cursor configuration fields:
 
-  * `extend_top` (true): consider any point above the topmost line as part of the line.
-  * `extend_bottom` (true): consider any point below the bottommost line as part of the line.
-  * `extend_left` (true): consider any point to the left of the text as part of that line.
-  * `extend_right` (true): consider any point to the right of the text as part of that line.
-  * `park_bos` (false): if trying to go above the topmost line, move to first offset.
-  * `park_eos` (false): if trying to go below the bottommost line, move to last offset.
-  * `skip_wrapped_char` (
+  * `park_home` (`true`): if trying to go above the topmost line, go to the first offset.
+  * `park_end` (`true`): if trying to go below the bottommost line, go to the last offset.
+  * `unique_offsets` (`false`): jump-through same-text-offset cursors like most editors do.
+  * `wrapped_space` (`false`): keep a cursor after the last space char on a wrapped line.
 
 Cursor state fields:
 
