@@ -1,5 +1,5 @@
 
-## `local tr0 = require'tr0'`
+## `local tr = require'tr0'`
 
 Text shaping and rendering engine for Unicode text using portable technologies
 exclusively for pixel-perfect consistent output across platforms. Uses
