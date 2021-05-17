@@ -34,7 +34,7 @@ end
 --gfont'open sans 300'
 --gfont'open sans 300 italic'
 font'media/fonts/NotoColorEmoji.ttf'
-font('media/fonts/OpenSans-Regular.ttf', 'open sans')
+font('OpenSans-Regular.ttf', 'open sans')
 font'media/fonts/IonIcons.ttf'
 --font'media/fonts/NotoEmoji-Regular.ttf'
 --font'media/fonts/EmojiSymbols-Regular.ttf'

@@ -16,7 +16,7 @@ local cr = sr:context()
 
 local tr = tr()
 tr:add_font_file('media/fonts/amiri-regular.ttf', 'amiri')
-tr:add_font_file('media/fonts/OpenSans-Regular.ttf ', 'open sans')
+tr:add_font_file('OpenSans-Regular.ttf ', 'open sans')
 
 print'here'
 local t0 = time.clock()
